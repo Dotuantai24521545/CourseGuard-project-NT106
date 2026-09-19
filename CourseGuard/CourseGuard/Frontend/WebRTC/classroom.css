@@ -1,0 +1,253 @@
+:root {
+    --cg-bg: #0b0b17;
+    --cg-panel: #11101f;
+    --cg-panel-2: #1a1830;
+    --cg-border: rgba(132, 118, 214, 0.24);
+    --cg-border-strong: rgba(132, 118, 214, 0.42);
+    --cg-text: #f7f7ff;
+    --cg-muted: #aaa8c7;
+    --cg-primary: #7c3aed;
+    --cg-danger: #ef4444;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #050611;
+    color: var(--cg-text);
+    font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.media-canvas {
+    display: grid;
+    width: 100vw;
+    height: 100vh;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 10px;
+    padding: 0;
+    background:
+        radial-gradient(circle at top left, rgba(124, 58, 237, 0.18), transparent 26rem),
+        linear-gradient(145deg, #080914, #050611 70%);
+}
+
+.media-canvas.has-filmstrip {
+    grid-template-rows: minmax(0, 1fr) 112px;
+    padding: 10px;
+}
+
+.media-canvas.screen-share,
+.media-canvas.screen-share-mode {
+    grid-template-columns: minmax(0, 1fr) 220px;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+    padding: 10px;
+}
+
+.main-stage,
+.filmstrip {
+    min-width: 0;
+    min-height: 0;
+}
+
+.main-stage {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-auto-rows: minmax(180px, 1fr);
+    gap: 10px;
+}
+
+.media-canvas.screen-share .main-stage,
+.media-canvas.screen-share-mode .main-stage {
+    display: block;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--cg-border-strong);
+    border-radius: 18px;
+    background: #050611;
+}
+
+.filmstrip {
+    display: none;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 2px 2px;
+    scrollbar-width: thin;
+}
+
+.media-canvas.has-filmstrip .filmstrip,
+.media-canvas.screen-share .filmstrip,
+.media-canvas.screen-share-mode .filmstrip {
+    display: flex;
+}
+
+.media-canvas.screen-share .filmstrip,
+.media-canvas.screen-share-mode .filmstrip {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-width: 0;
+    min-height: 0;
+    padding: 0 2px 2px;
+}
+
+.video-tile {
+    position: relative;
+    overflow: hidden;
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--cg-border);
+    border-radius: 18px;
+    background:
+        linear-gradient(135deg, rgba(17, 16, 31, 0.96), rgba(8, 9, 20, 0.98)),
+        #080914;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+}
+
+.video-tile::after {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    background: linear-gradient(180deg, rgba(3, 4, 12, 0.16), transparent 45%, rgba(3, 4, 12, 0.28));
+}
+
+.video-tile video {
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+    display: block;
+    object-fit: cover;
+    background: #050611;
+}
+
+.video-tile.screen video {
+    object-fit: contain;
+}
+
+.video-tile.focused {
+    width: 100%;
+    height: 100%;
+    border-radius: 18px;
+}
+
+.filmstrip .video-tile {
+    flex: 0 0 178px;
+    width: 178px;
+    height: 100%;
+    border-radius: 16px;
+}
+
+.media-canvas.screen-share .filmstrip .video-tile,
+.media-canvas.screen-share-mode .filmstrip .video-tile {
+    flex: 0 0 calc((100vh - 74px) / 6);
+    width: 100%;
+    height: calc((100vh - 74px) / 6);
+    min-height: 88px;
+    max-height: 148px;
+    border-radius: 16px;
+}
+
+.video-tile.camera-off video {
+    opacity: 0;
+}
+
+.video-placeholder {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 10px;
+    padding: 14px;
+    color: var(--cg-text);
+    background:
+        radial-gradient(circle at 50% 28%, rgba(124, 58, 237, 0.24), transparent 8rem),
+        linear-gradient(135deg, rgba(26, 24, 48, 0.98), rgba(5, 6, 17, 0.98));
+    font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    text-align: center;
+}
+
+.avatar-circle {
+    display: grid;
+    place-items: center;
+    width: clamp(48px, 7vw, 84px);
+    height: clamp(48px, 7vw, 84px);
+    border: 1px solid rgba(196, 181, 253, 0.42);
+    border-radius: 999px;
+    color: #f5f3ff;
+    background:
+        linear-gradient(135deg, rgba(124, 58, 237, 0.92), rgba(49, 46, 129, 0.88)),
+        #312e81;
+    box-shadow: 0 16px 34px rgba(49, 46, 129, 0.35);
+    font-size: clamp(1.15rem, 3vw, 2.1rem);
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.avatar-name {
+    max-width: 100%;
+    overflow: hidden;
+    color: #ddd6fe;
+    font-size: clamp(0.72rem, 1.3vw, 0.98rem);
+    font-weight: 700;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45);
+    white-space: nowrap;
+}
+
+.video-tile:not(.camera-off) .video-placeholder,
+.video-tile.screen .video-placeholder {
+    display: none;
+}
+
+.video-tile.muted {
+    border-color: rgba(239, 68, 68, 0.38);
+}
+
+.hidden {
+    display: none !important;
+}
+
+@media (max-width: 760px) {
+    .media-canvas.has-filmstrip {
+        grid-template-rows: minmax(0, 1fr) 96px;
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .media-canvas.screen-share,
+    .media-canvas.screen-share-mode {
+        grid-template-columns: minmax(0, 1fr) 132px;
+        grid-template-rows: minmax(0, 1fr);
+        gap: 8px;
+        padding: 8px;
+    }
+
+    .main-stage {
+        grid-template-columns: 1fr;
+        grid-auto-rows: minmax(160px, 1fr);
+    }
+
+    .filmstrip .video-tile {
+        flex-basis: 144px;
+        width: 144px;
+    }
+
+    .media-canvas.screen-share .filmstrip .video-tile,
+    .media-canvas.screen-share-mode .filmstrip .video-tile {
+        flex-basis: calc((100vh - 58px) / 6);
+        width: 100%;
+        height: calc((100vh - 58px) / 6);
+        min-height: 72px;
+    }
+}

@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "CourseGuardRelayApi": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:20311;http://localhost:20312"
+    }
+  }
+}

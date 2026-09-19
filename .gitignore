@@ -1,0 +1,39 @@
+# Visual Studio
+.vs/
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Agent
+.agent/
+.worktrees/
+
+# Documentation
+GEMINI.md
+DESIGN.md
+
+# Local skills folder
+awesome-agent-skills/
+
+# Local architecture notes
+PROJECT_CONTEXT.md
+
+# Config and Environment
+*.env
+.cursorrules
+
+# Local tool configs and outputs
+.vscode/
+stitch_tools/
+report.html
+dist/
+
+# Templates
+login-form-20/
+login-form20/
+

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="CourseGuard Live Classroom media canvas for WebRTC video and screen sharing." />
+    <title>CourseGuard Live Classroom Media Canvas</title>
+    <link rel="stylesheet" href="./classroom.css" />
+</head>
+<body>
+    <main id="mediaCanvas" class="media-canvas" aria-label="CourseGuard WebRTC media canvas">
+        <section id="mainStage" class="main-stage" aria-label="Focused classroom media"></section>
+        <section id="filmstrip" class="filmstrip" aria-label="Participant cameras"></section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./supabase-signaling.js"></script>
+    <script src="./relay-signaling.js"></script>
+    <script src="./classroom.js"></script>
+</body>
+</html>

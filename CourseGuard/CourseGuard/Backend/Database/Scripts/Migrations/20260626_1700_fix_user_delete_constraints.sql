@@ -1,0 +1,39 @@
+-- Migration: 20260626_1700_fix_user_delete_constraints.sql
+-- Description: Drop and recreate foreign key constraints to support clean user deletion (cascade and set null).
+
+-- 1) COURSES: ON DELETE CASCADE (deleting a teacher deletes their courses)
+ALTER TABLE COURSES DROP CONSTRAINT IF EXISTS courses_teacher_id_fkey;
+ALTER TABLE COURSES ADD CONSTRAINT courses_teacher_id_fkey FOREIGN KEY (teacher_id) REFERENCES USERS(id) ON DELETE CASCADE;
+
+-- 2) ENROLLMENTS: ON DELETE CASCADE
+ALTER TABLE ENROLLMENTS DROP CONSTRAINT IF EXISTS enrollments_student_id_fkey;
+ALTER TABLE ENROLLMENTS ADD CONSTRAINT enrollments_student_id_fkey FOREIGN KEY (student_id) REFERENCES USERS(id) ON DELETE CASCADE;
+
+-- 3) EXAMS: ON DELETE SET NULL (keep exam even if creator is deleted)
+ALTER TABLE EXAMS DROP CONSTRAINT IF EXISTS exams_created_by_fkey;
+ALTER TABLE EXAMS ADD CONSTRAINT exams_created_by_fkey FOREIGN KEY (created_by) REFERENCES USERS(id) ON DELETE SET NULL;
+
+-- 4) EXAM_ATTEMPTS: ON DELETE CASCADE
+ALTER TABLE EXAM_ATTEMPTS DROP CONSTRAINT IF EXISTS exam_attempts_student_id_fkey;
+ALTER TABLE EXAM_ATTEMPTS ADD CONSTRAINT exam_attempts_student_id_fkey FOREIGN KEY (student_id) REFERENCES USERS(id) ON DELETE CASCADE;
+
+-- 5) ONLINE_SESSIONS: ON DELETE CASCADE (tied to course, but if created_by is deleted, set null)
+ALTER TABLE ONLINE_SESSIONS DROP CONSTRAINT IF EXISTS online_sessions_created_by_fkey;
+ALTER TABLE ONLINE_SESSIONS ADD CONSTRAINT online_sessions_created_by_fkey FOREIGN KEY (created_by) REFERENCES USERS(id) ON DELETE SET NULL;
+
+-- 6) MATERIALS: ON DELETE CASCADE
+ALTER TABLE MATERIALS DROP CONSTRAINT IF EXISTS materials_uploaded_by_fkey;
+ALTER TABLE MATERIALS ADD CONSTRAINT materials_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES USERS(id) ON DELETE CASCADE;
+
+-- 7) MESSAGES: Make SENDER_ID nullable and set ON DELETE SET NULL (keep chat history)
+ALTER TABLE MESSAGES ALTER COLUMN sender_id DROP NOT NULL;
+ALTER TABLE MESSAGES DROP CONSTRAINT IF EXISTS messages_sender_id_fkey;
+ALTER TABLE MESSAGES ADD CONSTRAINT messages_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES USERS(id) ON DELETE SET NULL;
+
+-- 8) AUDIT_LOGS: ON DELETE SET NULL (keep audit history)
+ALTER TABLE AUDIT_LOGS DROP CONSTRAINT IF EXISTS audit_logs_user_id_fkey;
+ALTER TABLE AUDIT_LOGS ADD CONSTRAINT audit_logs_user_id_fkey FOREIGN KEY (user_id) REFERENCES USERS(id) ON DELETE SET NULL;
+
+-- 9) VIOLATIONS: ON DELETE CASCADE
+ALTER TABLE VIOLATIONS DROP CONSTRAINT IF EXISTS violations_user_id_fkey;
+ALTER TABLE VIOLATIONS ADD CONSTRAINT violations_user_id_fkey FOREIGN KEY (user_id) REFERENCES USERS(id) ON DELETE CASCADE;

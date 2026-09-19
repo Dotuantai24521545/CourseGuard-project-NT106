@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Đăng Nhập | COURSEGUARD</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-surface": "#e4e1ed",
+                    "inverse-surface": "#e4e1ed",
+                    "tertiary-fixed": "#e7defb",
+                    "on-tertiary-fixed": "#1d192d",
+                    "on-error-container": "#ffdad6",
+                    "surface-tint": "#00dbe9",
+                    "tertiary-fixed-dim": "#cac3de",
+                    "on-surface-variant": "#b9cacb",
+                    "tertiary-container": "#ddd5f2",
+                    "on-secondary-fixed": "#2d004f",
+                    "on-tertiary-fixed-variant": "#49445a",
+                    "background": "#13131b",
+                    "on-secondary": "#4b007e",
+                    "primary": "#dbfcff",
+                    "on-background": "#e4e1ed",
+                    "error-container": "#93000a",
+                    "primary-fixed-dim": "#00dbe9",
+                    "surface-bright": "#393842",
+                    "outline": "#849495",
+                    "on-primary": "#00363a",
+                    "on-tertiary": "#322d43",
+                    "primary-fixed": "#7df4ff",
+                    "outline-variant": "#3b494b",
+                    "surface-container-high": "#292932",
+                    "on-secondary-fixed-variant": "#6b00b0",
+                    "on-primary-fixed": "#002022",
+                    "primary-container": "#00f0ff",
+                    "surface-container": "#1f1f27",
+                    "surface-variant": "#34343d",
+                    "on-primary-container": "#006970",
+                    "surface-dim": "#13131b",
+                    "error": "#ffb4ab",
+                    "secondary-fixed-dim": "#dfb7ff",
+                    "inverse-on-surface": "#302f39",
+                    "secondary-container": "#9606f4",
+                    "surface-container-highest": "#34343d",
+                    "on-error": "#690005",
+                    "inverse-primary": "#006970",
+                    "surface": "#13131b",
+                    "on-tertiary-container": "#615b73",
+                    "on-primary-fixed-variant": "#004f54",
+                    "surface-container-lowest": "#0d0d16",
+                    "tertiary": "#f9f3ff",
+                    "secondary-fixed": "#f1daff",
+                    "on-secondary-container": "#f2dcff",
+                    "secondary": "#dfb7ff",
+                    "surface-container-low": "#1b1b23"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "stack-md": "24px",
+                    "container-padding": "24px",
+                    "stack-lg": "48px",
+                    "gutter": "16px",
+                    "stack-sm": "12px",
+                    "base": "8px"
+            },
+            "fontFamily": {
+                    "headline-lg": ["Outfit"],
+                    "display-lg": ["Outfit"],
+                    "body-lg": ["Inter"],
+                    "headline-md": ["Outfit"],
+                    "body-md": ["Inter"],
+                    "label-md": ["Inter"]
+            },
+            "fontSize": {
+                    "headline-lg": ["32px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                    "display-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-lg": ["18px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "headline-md": ["24px", {"lineHeight": "1.2", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "label-md": ["14px", {"lineHeight": "1.2", "letterSpacing": "0.08em", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background: radial-gradient(circle at 20% 30%, rgba(0, 219, 233, 0.08) 0%, transparent 40%),
+                        radial-gradient(circle at 80% 70%, rgba(150, 6, 244, 0.08) 0%, transparent 40%),
+                        #13131b;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .cyber-particle-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(0, 240, 255, 0.4);
+            box-shadow: 0 0 40px rgba(0, 219, 233, 0.15);
+            transform: translateY(-4px);
+        }
+
+        .glow-button {
+            background: linear-gradient(135deg, #00f0ff 0%, #9606f4 100%);
+            transition: all 0.3s ease;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .glow-button:hover {
+            box-shadow: 0 0 25px rgba(150, 6, 244, 0.5);
+            filter: brightness(1.1);
+            transform: scale(1.02);
+        }
+
+        .glow-button:active {
+            transform: scale(0.98);
+        }
+
+        .input-glow:focus-within {
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+            border-color: #00f0ff;
+        }
+
+        /* Material Symbols Customization */
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+            font-size: 20px;
+        }
+
+        @keyframes scanning {
+            0% { transform: translateY(-100%); opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { transform: translateY(200%); opacity: 0; }
+        }
+
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00f0ff, transparent);
+            animation: scanning 4s infinite linear;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center p-gutter">
+<canvas class="cyber-particle-bg" id="particles"></canvas>
+<!-- Top Navigation Bar (Shared Component Logic - Suppressed per rules for Transactional screen, but keeping product identity) -->
+<header class="fixed top-0 w-full z-50 py-stack-md flex justify-center">
+<div class="text-primary font-headline-md font-bold tracking-[0.2em]">COURSEGUARD</div>
+</header>
+<!-- Main Login Canvas -->
+<main class="w-full max-w-[450px] relative z-10" id="login-container">
+<!-- Floating Glass Card -->
+<div class="glass-card rounded-[2rem] p-10 flex flex-col gap-stack-md relative overflow-hidden" id="auth-card">
+<!-- Decorative Scan Line -->
+<div class="scan-line top-0 left-0"></div>
+<div class="text-center flex flex-col gap-base">
+<h1 class="text-on-surface font-headline-lg text-headline-lg uppercase">Đăng Nhập</h1>
+<p class="text-on-surface-variant font-body-md text-body-md">Hệ thống bảo mật khóa học thông minh</p>
+</div>
+<form action="#" class="flex flex-col gap-stack-md mt-4">
+<!-- Username Input -->
+<div class="flex flex-col gap-base">
+<div class="input-glow group relative flex items-center bg-black/30 border border-outline-variant/30 rounded-full px-6 py-4 transition-all duration-300">
+<span class="material-symbols-outlined text-primary-fixed-dim mr-3">person</span>
+<input class="w-full bg-transparent border-none focus:ring-0 text-on-surface placeholder:text-tertiary-fixed-dim/50 font-body-md text-body-md outline-none" placeholder="Tên đăng nhập" type="text"/>
+</div>
+</div>
+<!-- Password Input -->
+<div class="flex flex-col gap-base">
+<div class="input-glow group relative flex items-center bg-black/30 border border-outline-variant/30 rounded-full px-6 py-4 transition-all duration-300">
+<span class="material-symbols-outlined text-primary-fixed-dim mr-3">lock</span>
+<input class="w-full bg-transparent border-none focus:ring-0 text-on-surface placeholder:text-tertiary-fixed-dim/50 font-body-md text-body-md outline-none" placeholder="Mật khẩu" type="password"/>
+</div>
+</div>
+<!-- Controls -->
+<div class="flex items-center justify-between px-2">
+<label class="flex items-center cursor-pointer group">
+<div class="relative">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-5 h-5 border-2 border-outline-variant rounded-md bg-transparent peer-checked:bg-secondary-container peer-checked:border-secondary-container transition-all"></div>
+<span class="material-symbols-outlined absolute top-0 left-0 text-[16px] text-white opacity-0 peer-checked:opacity-100 transition-opacity">check</span>
+</div>
+<span class="ml-2 text-on-surface-variant font-label-md text-label-md group-hover:text-on-surface transition-colors">Ghi nhớ tôi</span>
+</label>
+<a class="text-primary-fixed-dim font-label-md text-label-md hover:underline decoration-primary-fixed-dim transition-all" href="#">Quên mật khẩu?</a>
+</div>
+<!-- CTA Button -->
+<button class="glow-button w-full rounded-full py-4 text-on-primary-fixed font-headline-md text-headline-md font-bold mt-2" type="submit">
+                    Đăng Nhập
+                </button>
+</form>
+<div class="mt-4 text-center">
+<a class="text-on-surface-variant font-label-md text-label-md hover:text-primary transition-colors duration-300" href="#">
+                    Bạn chưa có tài khoản? <span class="text-secondary-fixed font-bold underline">Đăng ký</span>
+</a>
+</div>
+</div>
+<!-- Ambient Branding Glows -->
+<div class="absolute -z-10 -top-20 -left-20 w-64 h-64 bg-primary/10 rounded-full blur-[80px]"></div>
+<div class="absolute -z-10 -bottom-20 -right-20 w-64 h-64 bg-secondary-container/10 rounded-full blur-[80px]"></div>
+</main>
+<!-- Footer (Suppressed active links per rules for login screen, but using product copyright) -->
+<footer class="fixed bottom-0 w-full py-stack-md flex flex-col items-center gap-base">
+<p class="text-on-surface-variant font-label-md text-label-md opacity-50">© 2024 CourseGuard. All rights reserved.</p>
+</footer>
+<script>
+        // Particle Background Logic
+        const canvas = document.getElementById('particles');
+        const ctx = canvas.getContext('2d');
+        let particlesArray;
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        class Particle {
+            constructor(x, y, directionX, directionY, size, color) {
+                this.x = x;
+                this.y = y;
+                this.directionX = directionX;
+                this.directionY = directionY;
+                this.size = size;
+                this.color = color;
+            }
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+            }
+            update() {
+                if (this.x > canvas.width || this.x < 0) this.directionX = -this.directionX;
+                if (this.y > canvas.height || this.y < 0) this.directionY = -this.directionY;
+                this.x += this.directionX;
+                this.y += this.directionY;
+                this.draw();
+            }
+        }
+
+        function init() {
+            particlesArray = [];
+            let numberOfParticles = (canvas.height * canvas.width) / 12000;
+            for (let i = 0; i < numberOfParticles; i++) {
+                let size = (Math.random() * 2) + 0.5;
+                let x = (Math.random() * ((innerWidth - size * 2) - (size * 2)) + size * 2);
+                let y = (Math.random() * ((innerHeight - size * 2) - (size * 2)) + size * 2);
+                let directionX = (Math.random() * 0.5) - 0.25;
+                let directionY = (Math.random() * 0.5) - 0.25;
+                let color = Math.random() > 0.5 ? '#00dbe922' : '#9606f422';
+                particlesArray.push(new Particle(x, y, directionX, directionY, size, color));
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            ctx.clearRect(0, 0, innerWidth, innerHeight);
+            for (let i = 0; i < particlesArray.length; i++) {
+                particlesArray[i].update();
+            }
+        }
+
+        window.addEventListener('resize', function() {
+            canvas.width = innerWidth;
+            canvas.height = innerHeight;
+            init();
+        });
+
+        init();
+        animate();
+
+        // 3D Tilt Interaction
+        const card = document.getElementById('auth-card');
+        const container = document.body;
+
+        container.addEventListener('mousemove', (e) => {
+            let xAxis = (window.innerWidth / 2 - e.pageX) / 45;
+            let yAxis = (window.innerHeight / 2 - e.pageY) / 45;
+            card.style.transform = `rotateY(${xAxis}deg) rotateX(${yAxis}deg)`;
+        });
+
+        container.addEventListener('mouseenter', (e) => {
+            card.style.transition = 'none';
+        });
+
+        container.addEventListener('mouseleave', (e) => {
+            card.style.transition = 'all 0.5s ease';
+            card.style.transform = `rotateY(0deg) rotateX(0deg)`;
+        });
+    </script>
+</body></html>

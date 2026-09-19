@@ -1,0 +1,8 @@
+-- Migration: 20260626_1600_add_course_schedule_fields.sql
+-- Description: Add structured scheduling columns to COURSES table.
+
+ALTER TABLE COURSES ADD COLUMN IF NOT EXISTS teaching_days VARCHAR(255);
+ALTER TABLE COURSES ADD COLUMN IF NOT EXISTS session_start_time TIME;
+ALTER TABLE COURSES ADD COLUMN IF NOT EXISTS session_end_time TIME;
+ALTER TABLE COURSES ADD COLUMN IF NOT EXISTS frequency VARCHAR(50) DEFAULT 'Weekly';
+ALTER TABLE COURSES ADD COLUMN IF NOT EXISTS meeting_link VARCHAR(500);

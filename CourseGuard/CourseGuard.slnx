@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CourseGuard/CourseGuard.csproj" />
+  <Project Path="CourseGuardRelayApi/CourseGuardRelayApi.csproj" />
+</Solution>

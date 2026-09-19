@@ -1,0 +1,17 @@
+Username | Password | FullName | Email | Role
+--- | --- | --- | --- | ---
+t_annguyen | 123456 | Nguyễn Văn An | an.nguyen@course.local | Teacher
+t_binhtran | 123456 | Trần Thị Bình | binh.tran@course.local | Teacher
+t_cuongle | 123456 | Lê Văn Cường | cuong.le@course.local | Teacher
+t_dungpham | 123456 | Phạm Tiến Dũng | dung.pham@course.local | Teacher
+t_emhoang | 123456 | Hoàng Thị Em | em.hoang@course.local | Teacher
+s_giangvu | 123456 | Vũ Trường Giang | giang.vu@student.course.local | Student
+s_hoado | 123456 | Đỗ Thị Hoa | hoa.do@student.course.local | Student
+s_khanhbui | 123456 | Bùi Quốc Khánh | khanh.bui@student.course.local | Student
+s_lamngo | 123456 | Ngô Tùng Lâm | lam.ngo@student.course.local | Student
+s_mytran | 123456 | Trần Trà My | my.tran@student.course.local | Student
+s_namnguyen | 123456 | Nguyễn Thành Nam | nam.nguyen@student.course.local | Student
+s_oanhle | 123456 | Lê Kiều Oanh | oanh.le@student.course.local | Student
+s_phuongpham | 123456 | Phạm Minh Phương | phuong.pham@student.course.local | Student
+s_quangho | 123456 | Hồ Nhật Quang | quang.ho@student.course.local | Student
+s_sonvu | 123456 | Vũ Thái Sơn | son.vu@student.course.local | Student
