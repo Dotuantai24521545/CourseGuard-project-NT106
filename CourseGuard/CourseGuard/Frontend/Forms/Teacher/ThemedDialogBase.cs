@@ -46,7 +46,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
             StartPosition = FormStartPosition.CenterParent;
             Width = 700;
             Height = 500;
-            BackColor = AppColors.BorderStrong;
+            BackColor = Color.FromArgb(24, 28, 43);
             Tag = "dialog";
             ShowInTaskbar = false;
             ForeColor = AppColors.TextPrimary;
@@ -202,12 +202,12 @@ namespace CourseGuard.Frontend.Forms.Teacher
             AppColors.ApplyTheme(this);
 
             // Restore BackColor which AppColors.ApplyTheme overwrites
-            BackColor = AppColors.BorderStrong;
+            BackColor = Color.FromArgb(30, 35, 50);
 
             // Re-apply to custom drawn elements
-            _root.BackColor = Color.Transparent;
-            _contentPanel.BackColor = Color.Transparent;
-            _footerPanel.BackColor = Color.Transparent;
+            _root.BackColor = Color.FromArgb(24, 28, 43);
+            _contentPanel.BackColor = Color.FromArgb(24, 28, 43);
+            _footerPanel.BackColor = Color.FromArgb(24, 28, 43);
             DialogInputStyler.ApplyAdminStyle(ContentPanel);
             DialogInputStyler.ApplyAdminStyle(FooterPanel);
         }
