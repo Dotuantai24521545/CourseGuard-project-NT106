@@ -34,7 +34,7 @@ namespace CourseGuard.Frontend.Forms.Student
         private bool _isShowingSubmitConfirmation;
         private Label _progressLabel = null!;
         private Label _saveStatusLabel = null!;
-        
+
         // Resilience & Offline Recovery Fields
         private int _syncCounter;
         private bool _isSyncingCache;
@@ -56,7 +56,7 @@ namespace CourseGuard.Frontend.Forms.Student
             ApplyAcademicExamTheme();
             WireEvents();
             RoundedButtonHelper.Apply(10, btnSubmit, btnPrev, btnNext);
-            
+
             this.WindowState = FormWindowState.Maximized;
             this.TopMost = true;
             this.MinimizeBox = false;
@@ -160,7 +160,7 @@ namespace CourseGuard.Frontend.Forms.Student
             btnSubmit.Click += (_, _) => SubmitExam(confirm: true);
             btnPrev.Click += (_, _) => MoveQuestion(-1);
             btnNext.Click += (_, _) => MoveQuestion(1);
-            chkMark.CheckedChanged += (_, _) => 
+            chkMark.CheckedChanged += (_, _) =>
             {
                 if (_session != null && !_loadingQuestion)
                 {
@@ -547,10 +547,7 @@ namespace CourseGuard.Frontend.Forms.Student
             catch (Exception)
             {
                 LocalAnswerCache.SaveAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
-                question.SelectedOption = option;
-                UpdateQuestionButtons();
-                UpdateProgressSummary();
-                UpdateSaveStatus(false, offline: true);
+                UpdateSaveStatus(false);
                 return;
             }
 
@@ -567,7 +564,7 @@ namespace CourseGuard.Frontend.Forms.Student
             question.SelectedOption = option;
             UpdateQuestionButtons();
             UpdateProgressSummary();
-            UpdateSaveStatus(false, offline: true);
+            UpdateSaveStatus(false);
         }
 
         private void UpdateProgressSummary()
@@ -698,7 +695,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
                 var question = _session.Questions[i];
                 bool answered = !string.IsNullOrWhiteSpace(question.SelectedOption);
-                
+
                 if (i == _currentIndex)
                 {
                     button.BackColor = AcademicTheme.Primary;
@@ -748,7 +745,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
             LowLevelKeyboardHook.Unhook();
             LowLevelKeyboardHook.OnCheatKeyPressed -= LowLevelKeyboardHook_OnCheatKeyPressed;
-            
+
             _timer.Stop();
             _antiCheatTimer.Stop();
             _monitoringCts.Cancel();
@@ -820,7 +817,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 if (cachedAnswers.Count == 0)
                 {
                     LocalAnswerCache.Clear(_session.AttemptId);
-                    
+
                     void ResetSaveStatusSuccess()
                     {
                         if (_saveStatusLabel != null && !_saveStatusLabel.IsDisposed)
@@ -863,7 +860,7 @@ namespace CourseGuard.Frontend.Forms.Student
             };
             innerContainer.Left = (this.ClientSize.Width - innerContainer.Width) / 2;
             innerContainer.Top = (this.ClientSize.Height - innerContainer.Height) / 2;
-            
+
             this.Resize += (s, e) =>
             {
                 if (_pnlLock != null && innerContainer != null && !innerContainer.IsDisposed)
@@ -968,7 +965,7 @@ namespace CourseGuard.Frontend.Forms.Student
             if (OtpRecoveryService.VerifyOtp(studentId, _session.AttemptId, otp))
             {
                 _connectionLostViolationRecorded = false;
-                
+
                 if (_pnlLock != null)
                 {
                     _pnlLock.Visible = false;
@@ -1000,7 +997,7 @@ namespace CourseGuard.Frontend.Forms.Student
             try
             {
                 int studentId = UserSessionContext.CurrentUserId ?? 0;
-                
+
                 var studentUser = await System.Threading.Tasks.Task.Run(() => _dbContext.GetUserById(studentId));
                 if (studentUser == null || string.IsNullOrWhiteSpace(studentUser.Email))
                 {
