@@ -177,6 +177,7 @@ namespace CourseGuard.Frontend.Forms.Student
             _timer.Tick += (_, _) => UpdateTimerText();
             _antiCheatTimer.Interval = 1000;
             _antiCheatTimer.Tick += AntiCheatTimer_Tick;
+            _antiCheatTimer.Start();
         }
 
         private void LoadExamSession()
@@ -545,7 +546,11 @@ namespace CourseGuard.Frontend.Forms.Student
             }
             catch (Exception)
             {
-                UpdateSaveStatus(false);
+                LocalAnswerCache.SaveAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
+                question.SelectedOption = option;
+                UpdateQuestionButtons();
+                UpdateProgressSummary();
+                UpdateSaveStatus(false, offline: true);
                 return;
             }
 
@@ -558,7 +563,11 @@ namespace CourseGuard.Frontend.Forms.Student
                 return;
             }
 
-            UpdateSaveStatus(false);
+            LocalAnswerCache.SaveAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
+            question.SelectedOption = option;
+            UpdateQuestionButtons();
+            UpdateProgressSummary();
+            UpdateSaveStatus(false, offline: true);
         }
 
         private void UpdateProgressSummary()
