@@ -78,21 +78,22 @@ namespace CourseGuard.Backend.Controllers
             }
         }
 
-        public bool DeleteCourse(int courseId)
+        public string DeleteCourse(int courseId)
         {
             if (!UserSessionContext.IsAdmin())
-            {
-                return false;
-            }
+                return "Không có quyền thực hiện thao tác này.";
 
             try
             {
                 _dbContext.DeleteCourse(courseId);
-                return true;
+                return "Success";
             }
-            catch
+            catch (Exception ex)
             {
-                return false;
+                if (ex.Message.Contains("violates foreign key constraint") || ex.Message.Contains("reference"))
+                    return "Không thể xóa: Khóa học đang có sinh viên ghi danh hoặc chứa tài liệu, bài tập.";
+
+                return "Lỗi hệ thống: " + ex.Message;
             }
         }
 
@@ -200,42 +201,7 @@ namespace CourseGuard.Backend.Controllers
             return _dbContext.GetStudentEnrolledCourseIds(studentId);
         }
 
-        public bool StudentJoinCourse(int courseId, int studentId)
-        {
-            if (studentId <= 0)
-            {
-                return false;
-            }
-
-            if (UserSessionContext.CurrentUserId != studentId)
-            {
-                return false;
-            }
-
-            if (_dbContext.HasStudentConflict(studentId, courseId))
-            {
-                throw new InvalidOperationException("Học sinh đã có lịch học trùng với khóa học này.");
-            }
-
-            try
-            {
-                bool enrolled = _dbContext.EnrollStudent(courseId, studentId);
-                if (enrolled)
-                {
-                    _dbContext.LogUserActivity(
-                        studentId,
-                        "COURSE_ENROLL_REQUEST",
-                        $"Học viên ID={studentId} tham gia khóa học ID={courseId}",
-                        string.Empty);
-                }
-
-                return enrolled;
-            }
-            catch
-            {
-                return false;
-            }
-        }
+        
 
         public List<EnrollmentModel> GetPendingEnrollments(int? courseId = null)
         {

@@ -58,6 +58,9 @@ namespace CourseGuard.Backend.Controllers
         public bool UpdateCourse(int teacherId, TeacherCourseModel input)
         {
             if (teacherId <= 0) return false;
+
+
+
             if (input.StartDate.HasValue && input.EndDate.HasValue && input.SessionStartTime.HasValue && input.SessionEndTime.HasValue && input.TeachingDays.Count > 0)
             {
                 string daysStr = string.Join(",", input.TeachingDays);
@@ -66,7 +69,16 @@ namespace CourseGuard.Backend.Controllers
                     throw new InvalidOperationException("Giáo viên đã có lịch dạy vào thời gian này.");
                 }
             }
-            return _repository.UpdateCourse(teacherId, input);
+
+            bool isUpdated = _repository.UpdateCourse(teacherId, input);
+
+            // Tùy chọn: Ghi log hoạt động để theo dõi
+            if (isUpdated)
+            {
+                _dbContext.LogUserActivity(teacherId, "COURSE_UPDATE", $"Giảng viên đã cập nhật khóa học: {input.Name} (Chờ duyệt lại)", string.Empty);
+            }
+
+            return isUpdated;
         }
 
         public bool SubmitCourseForApproval(int teacherId, int courseId) =>

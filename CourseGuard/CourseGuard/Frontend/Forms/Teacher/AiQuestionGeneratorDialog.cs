@@ -57,7 +57,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 RowCount = 3,
                 Padding = new Padding(0)
             };
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 210));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 300));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
 
@@ -90,7 +90,8 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(6, 0, 0, 0)
+                Padding = new Padding(6, 0, 0, 0),
+                AutoScroll = true 
             };
             optionsPanel.Controls.Add(new Label { Text = "Số câu Nhận biết (Easy):", AutoSize = true, Font = AppFonts.Body });
             optionsPanel.Controls.Add(_numEasy);

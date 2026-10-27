@@ -508,8 +508,16 @@ namespace CourseGuard.Frontend.Forms.Admin
         {
             if (MetaTheme.ShowModernDialog("Xóa khóa học này?", "Xác nhận", MessageBoxButtons.YesNo) == DialogResult.Yes)
             {
-                bool ok = await Task.Run(() => _courseService.DeleteCourse(_courseId));
-                if (ok) { this.DialogResult = DialogResult.OK; this.Close(); }
+                string result = await Task.Run(() => _courseService.DeleteCourse(_courseId));
+                if (result == "Success")
+                {
+                    this.DialogResult = DialogResult.OK;
+                    this.Close();
+                }
+                else
+                {
+                    MetaTheme.ShowModernDialog(result, "Lỗi xóa khóa học", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
         

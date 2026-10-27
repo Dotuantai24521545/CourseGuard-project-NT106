@@ -56,9 +56,9 @@ namespace CourseGuard.Backend.Services
                 model,
                 messages = new[]
                 {
-                    new { role = "system", content = systemPrompt },
-                    new { role = "user", content = userPrompt }
-                },
+            new { role = "system", content = systemPrompt },
+            new { role = "user", content = userPrompt }
+        },
                 temperature = 0.3
             };
 
@@ -68,16 +68,25 @@ namespace CourseGuard.Backend.Services
             request.Headers.Add("X-Title", "CourseGuard AI Engine");
             request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-            using var response = await _httpClient.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
-                throw new HttpRequestException(
-                    $"OpenRouter trả về HTTP {(int)response.StatusCode}. Kiểm tra API key, model và hạn mức dịch vụ.",
-                    null, response.StatusCode);
+            string text;
+            try
+            {
+                using var response = await _httpClient.SendAsync(request);
+                if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired)
+                    throw new Exception("Tài khoản đã hết Quota sử dụng AI. Vui lòng kiểm tra lại API Key.");
+                if (!response.IsSuccessStatusCode)
+                    throw new Exception($"OpenRouter trả về lỗi HTTP {(int)response.StatusCode}. Vui lòng thử lại.");
 
-            string responseBody = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(responseBody);
-            string text = doc.RootElement.GetProperty("choices")[0].GetProperty("message")
-                .GetProperty("content").GetString()?.Trim() ?? string.Empty;
+                string responseBody = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(responseBody);
+                text = doc.RootElement.GetProperty("choices")[0].GetProperty("message")
+                    .GetProperty("content").GetString()?.Trim() ?? string.Empty;
+            }
+            catch (TaskCanceledException)
+            {
+                throw new Exception("Kết nối đến AI bị quá hạn (Timeout). Vui lòng kiểm tra mạng và thử lại.");
+            }
+
             if (string.IsNullOrWhiteSpace(text))
                 throw new InvalidOperationException("OpenRouter không trả về nội dung. Vui lòng thử lại.");
 
@@ -99,16 +108,24 @@ namespace CourseGuard.Backend.Services
 
             string rawJson = await CallOpenRouterAsync(systemPrompt, userPrompt);
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var questions = JsonSerializer.Deserialize<List<AiGeneratedQuestion>>(rawJson, options);
-            if (questions == null || questions.Count == 0 || questions.Exists(q => q == null
-                || string.IsNullOrWhiteSpace(q.Content) || string.IsNullOrWhiteSpace(q.OptionA)
-                || string.IsNullOrWhiteSpace(q.OptionB) || string.IsNullOrWhiteSpace(q.OptionC)
-                || string.IsNullOrWhiteSpace(q.OptionD) || q.CorrectOption is not ("A" or "B" or "C" or "D")))
-                throw new InvalidOperationException("AI trả về câu hỏi không hợp lệ. Vui lòng thử lại.");
-            return questions;
+
+            try
+            {
+                var questions = JsonSerializer.Deserialize<List<AiGeneratedQuestion>>(rawJson, options);
+                if (questions == null || questions.Count == 0 || questions.Exists(q => q == null
+                    || string.IsNullOrWhiteSpace(q.Content) || string.IsNullOrWhiteSpace(q.OptionA)
+                    || string.IsNullOrWhiteSpace(q.OptionB) || string.IsNullOrWhiteSpace(q.OptionC)
+                    || string.IsNullOrWhiteSpace(q.OptionD) || q.CorrectOption is not ("A" or "B" or "C" or "D")))
+                    throw new InvalidOperationException("AI trả về dữ liệu thiếu thông tin. Vui lòng thử lại.");
+                return questions;
+            }
+            catch (JsonException)
+            {
+                throw new Exception("AI trả về sai định dạng dữ liệu (không phải JSON). Vui lòng thử tạo lại.");
+            }
         }
 
-        // ✍️ 1. AI Chấm bài Tự luận (AI Essay Grading)
+        //  1. AI Chấm bài Tự luận (AI Essay Grading)
         public async Task<AiEssayGradeResult> GradeEssayAsync(string questionText, string sampleAnswer, string studentSubmission, decimal maxPoints)
         {
             if (maxPoints <= 0) throw new ArgumentOutOfRangeException(nameof(maxPoints));
@@ -117,14 +134,22 @@ namespace CourseGuard.Backend.Services
 
             string rawJson = await CallOpenRouterAsync(systemPrompt, userPrompt);
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var result = JsonSerializer.Deserialize<AiEssayGradeResult>(rawJson, options);
-            if (result == null || result.SuggestedScore < 0 || result.SuggestedScore > maxPoints
-                || string.IsNullOrWhiteSpace(result.Feedback))
-                throw new InvalidOperationException("AI trả về kết quả chấm điểm không hợp lệ.");
-            return result;
+
+            try
+            {
+                var result = JsonSerializer.Deserialize<AiEssayGradeResult>(rawJson, options);
+                if (result == null || result.SuggestedScore < 0 || result.SuggestedScore > maxPoints
+                    || string.IsNullOrWhiteSpace(result.Feedback))
+                    throw new InvalidOperationException("AI trả về kết quả chấm điểm thiếu thông tin. Vui lòng thử lại.");
+                return result;
+            }
+            catch (JsonException)
+            {
+                throw new Exception("AI trả về sai định dạng dữ liệu (không phải JSON). Vui lòng thử tạo lại.");
+            }
         }
 
-        // 🤖 2. Trợ lý Học tập 24/7 (Virtual Course Tutor)
+        // 2. Trợ lý Học tập 24/7 (Virtual Course Tutor)
         public async Task<string> AskVirtualTutorAsync(string courseName, string lectureContext, string studentQuestion)
         {
             string systemPrompt = "Bạn là Trợ lý Học tập AI 24/7 môn " + courseName + ". Hãy giải đáp thắc mắc của sinh viên một cách dễ hiểu, tận tâm và bám sát kiến thức giáo trình.";
@@ -134,7 +159,7 @@ namespace CourseGuard.Backend.Services
             return answer;
         }
 
-        // 🃏 3. Tự động Tạo Thẻ Ôn tập (AI Flashcards Generator)
+        // 3. Tự động Tạo Thẻ Ôn tập (AI Flashcards Generator)
         public async Task<List<AiFlashcard>> GenerateFlashcardsAsync(string lectureContent, int count = 5)
         {
             string systemPrompt = "Bạn là chuyên gia tổng hợp kiến thức. Hãy trích xuất các thuật ngữ và định nghĩa quan trọng nhất từ bài giảng thành bộ thẻ ghi nhớ (Flashcards). Trả về JSON thuần túy danh sách các thẻ có thuộc tính term và definition.";
@@ -142,11 +167,19 @@ namespace CourseGuard.Backend.Services
 
             string rawJson = await CallOpenRouterAsync(systemPrompt, userPrompt);
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var cards = JsonSerializer.Deserialize<List<AiFlashcard>>(rawJson, options);
-            if (cards == null || cards.Count == 0 || cards.Exists(c => c == null
-                || string.IsNullOrWhiteSpace(c.Term) || string.IsNullOrWhiteSpace(c.Definition)))
-                throw new InvalidOperationException("AI trả về flashcard không hợp lệ. Vui lòng thử lại.");
-            return cards;
+
+            try
+            {
+                var cards = JsonSerializer.Deserialize<List<AiFlashcard>>(rawJson, options);
+                if (cards == null || cards.Count == 0 || cards.Exists(c => c == null
+                    || string.IsNullOrWhiteSpace(c.Term) || string.IsNullOrWhiteSpace(c.Definition)))
+                    throw new InvalidOperationException("AI trả về flashcard thiếu thông tin. Vui lòng thử lại.");
+                return cards;
+            }
+            catch (JsonException)
+            {
+                throw new Exception("AI trả về sai định dạng dữ liệu (không phải JSON). Vui lòng thử tạo lại.");
+            }
         }
     }
 }

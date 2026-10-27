@@ -40,11 +40,19 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             AddHeaderAction(_submitButton);
         }
 
-        protected override Task<DataTable> CreateTableAsync() => Task.Run(() =>
+        protected override Task<DataTable> CreateTableAsync()
         {
-            _allCourses = Controller.GetCourses(TeacherId).ToList();
-            return BuildCourseTable(ApplyLocalFilters(_allCourses));
-        });
+            // Đọc giá trị UI trên luồng chính 
+            string keyword = txtSearch.Text.Trim();
+            string status = cboStatusFilter.SelectedItem?.ToString() ?? "Tất cả";
+
+            return Task.Run(() =>
+            {
+                _allCourses = Controller.GetCourses(TeacherId).ToList();
+                // Truyền giá trị string vào hàm
+                return BuildCourseTable(ApplyLocalFilters(_allCourses, keyword, status));
+            });
+        }
 
         protected override async Task AddAsync()
         {
@@ -66,7 +74,11 @@ namespace CourseGuard.Frontend.UserControls.Teacher
                 ShowReadOnlyDetails(course, "Khóa học đã Active nên không thể chỉnh sửa. Hiển thị thông tin chỉ đọc.");
                 return;
             }
-
+            if (string.Equals(course.Status, WorkflowConstants.CourseStatus.Pending, StringComparison.OrdinalIgnoreCase))
+            {
+                MetaTheme.ShowModernDialog("Khóa học đang chờ Admin duyệt, không thể chỉnh sửa lúc này.", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
             using var dialog = new TeacherCourseDialog(course);
             if (dialog.ShowDialog(FindForm()) == System.Windows.Forms.DialogResult.OK)
             {
@@ -215,10 +227,8 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             }
         }
 
-        private IEnumerable<TeacherCourseModel> ApplyLocalFilters(IEnumerable<TeacherCourseModel> courses)
+        private IEnumerable<TeacherCourseModel> ApplyLocalFilters(IEnumerable<TeacherCourseModel> courses, string keyword, string status)
         {
-            string keyword = txtSearch.Text.Trim();
-            string status = cboStatusFilter.SelectedItem?.ToString() ?? "Tất cả";
             IEnumerable<TeacherCourseModel> filtered = courses;
 
             if (!string.IsNullOrWhiteSpace(keyword))
