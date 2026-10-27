@@ -37,3 +37,4 @@ dist/
 login-form-20/
 login-form20/
 
+/CourseGuard/CourseGuard/Backend/Controllers/AuthController.cs
