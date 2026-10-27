@@ -27,6 +27,15 @@ namespace CourseGuard.Frontend.UserControls.Teacher
         private Label _materialSummaryDetail = null!;
         private Label _materialSummaryAction = null!;
 
+
+        //TODO: Hàm giả upload. Phải thay bằng api của thanh viên nhiệm vụ 4
+        private async Task<string> MockTransportUploadAsync(string localFilePath)
+        {
+            await Task.Delay(1500); // Giả lập mạng
+            string fileName = System.IO.Path.GetFileName(localFilePath);
+            return $"https://mock-storage.com/materials/{fileName}";
+        }
+
         public UC_TeacherMaterials(int teacherId, TeacherController controller)
             : this(teacherId, controller, null)
         {
@@ -88,7 +97,9 @@ namespace CourseGuard.Frontend.UserControls.Teacher
                 lockCourseSelection: _initialCourseId.HasValue);
             if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
             {
-                var model = await Task.Run(() => BuildMaterialModel(dialog.CourseId, dialog.SelectedFilePath));
+                string uploadedUrl = await MockTransportUploadAsync(dialog.SelectedFilePath);
+                var model = await Task.Run(() => BuildMaterialModel(dialog.CourseId, dialog.SelectedFilePath, uploadedUrl));
+
                 await Task.Run(() => Controller.CreateMaterial(TeacherId, model));
                 LoadCourseFilter();
                 await LoadDataAsync();
@@ -110,7 +121,8 @@ namespace CourseGuard.Frontend.UserControls.Teacher
                 lockCourseSelection: _initialCourseId.HasValue);
             if (dialog.ShowDialog(FindForm()) == DialogResult.OK)
             {
-                TeacherMaterialModel model = await Task.Run(() => BuildMaterialModel(dialog.CourseId, dialog.SelectedFilePath));
+                string uploadedUrl = await MockTransportUploadAsync(dialog.SelectedFilePath);
+                TeacherMaterialModel model = await Task.Run(() => BuildMaterialModel(dialog.CourseId, dialog.SelectedFilePath, uploadedUrl));
                 model.Id = id;
                 await Task.Run(() => Controller.UpdateMaterial(TeacherId, model));
                 LoadCourseFilter();
@@ -350,18 +362,18 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             return row.Cells.Cast<DataGridViewCell>().FirstOrDefault(cell => cell.Visible);
         }
 
-        private static TeacherMaterialModel BuildMaterialModel(int courseId, string filePath)
+        private static TeacherMaterialModel BuildMaterialModel(int courseId, string filePath, string uploadedUrl)
         {
             var info = new FileInfo(filePath);
             return new TeacherMaterialModel
             {
                 CourseId = courseId,
                 FileName = info.Name,
-                FilePath = filePath,
+                FilePath = uploadedUrl,
                 ContentType = MaterialFilePolicy.ResolveMimeType(info.Name),
                 FileSize = info.Length,
-                FileContent = File.ReadAllBytes(filePath),
-                HasStoredContent = true
+                FileContent = null,
+                HasStoredContent = false
             };
         }
 

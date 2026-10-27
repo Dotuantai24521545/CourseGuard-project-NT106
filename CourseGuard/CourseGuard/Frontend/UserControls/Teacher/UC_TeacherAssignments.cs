@@ -62,17 +62,29 @@ namespace CourseGuard.Frontend.UserControls.Teacher
                 var model = new TeacherAssignmentModel { CourseId = dialog.CourseId, Title = dialog.ItemTitle, Description = dialog.Details, DueAt = dialog.SelectedDate, Status = dialog.Status };
                 if (!string.IsNullOrEmpty(dialog.SelectedFilePath) && File.Exists(dialog.SelectedFilePath))
                 {
+                    string uploadedUrl = await MockTransportUploadAsync(dialog.SelectedFilePath);
                     var info = new FileInfo(dialog.SelectedFilePath);
                     model.FileName = info.Name;
-                    model.FilePath = dialog.SelectedFilePath;
+                    model.FilePath = uploadedUrl;
                     model.FileSize = info.Length;
-                    model.FileContent = File.ReadAllBytes(dialog.SelectedFilePath);
+                    model.FileContent = null;
                     model.ContentType = MaterialFilePolicy.ResolveMimeType(info.Name);
+                    model.HasStoredContent = false;
                 }
                 await Task.Run(() => Controller.CreateAssignment(TeacherId, model));
                 await LoadDataAsync();
             }
         }
+
+        // TODO: Thay thế bằng API Upload của Member 4, đây chỉ là hàm giả
+        private async Task<string> MockTransportUploadAsync(string localFilePath)
+        {
+            await Task.Delay(1500);
+            string fileName = Path.GetFileName(localFilePath);
+            return $"https://mock-storage.com/assignments/{fileName}";
+        }
+
+
         protected override async Task EditAsync()
         {
             int id = CurrentInt("Id");
@@ -88,12 +100,14 @@ namespace CourseGuard.Frontend.UserControls.Teacher
                 var model = new TeacherAssignmentModel { Id = id, CourseId = dialog.CourseId, Title = dialog.ItemTitle, Description = dialog.Details, DueAt = dialog.SelectedDate, Status = dialog.Status };
                 if (!string.IsNullOrEmpty(dialog.SelectedFilePath) && File.Exists(dialog.SelectedFilePath))
                 {
+                    string uploadedUrl = await MockTransportUploadAsync(dialog.SelectedFilePath);
                     var info = new FileInfo(dialog.SelectedFilePath);
                     model.FileName = info.Name;
-                    model.FilePath = dialog.SelectedFilePath;
+                    model.FilePath = uploadedUrl;
                     model.FileSize = info.Length;
-                    model.FileContent = File.ReadAllBytes(dialog.SelectedFilePath);
+                    model.FileContent = null;
                     model.ContentType = MaterialFilePolicy.ResolveMimeType(info.Name);
+                    model.HasStoredContent = false;
                 }
                 else if (existing != null)
                 {
