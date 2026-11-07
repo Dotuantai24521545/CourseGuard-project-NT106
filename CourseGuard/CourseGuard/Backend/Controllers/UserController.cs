@@ -5,6 +5,7 @@ using CourseGuard.Backend.Models;
 using CourseGuard.Backend.Security;
 using CourseGuard.Backend.Services;
 using Npgsql;
+using System.Linq;
 namespace CourseGuard.Backend.Controllers
 {
     public class UserController
@@ -18,14 +19,35 @@ namespace CourseGuard.Backend.Controllers
         }
 
         // Placeholder methods to replace the former IUserService
-        public List<UserModel> SearchUsers(string status, string role)
+        public List<UserModel> SearchUsers(string username, string fullName, string email, string status, string role)
         {
             if (!UserSessionContext.IsAdmin())
             {
                 LastErrorMessage = "Bạn không có quyền truy cập danh sách người dùng.";
                 return new List<UserModel>();
             }
-            return _dbContext.SearchUsers(status, role);
+
+            var users = _dbContext.SearchUsers(status, role);
+
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                string searchUsername = username.ToLower();
+                users = users.Where(u => u.Username != null && u.Username.ToLower().Contains(searchUsername)).ToList();
+            }
+
+            if (!string.IsNullOrWhiteSpace(fullName))
+            {
+                string searchFullName = fullName.ToLower();
+                users = users.Where(u => u.FullName != null && u.FullName.ToLower().Contains(searchFullName)).ToList();
+            }
+
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                string searchEmail = email.ToLower();
+                users = users.Where(u => u.Email != null && u.Email.ToLower().Contains(searchEmail)).ToList();
+            }
+
+            return users;
         }
 
         public List<UserModel> GetByRole(string role)

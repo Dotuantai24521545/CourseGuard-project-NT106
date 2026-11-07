@@ -82,6 +82,7 @@ namespace CourseGuard.Frontend.Forms.Login
         public LoginPage()
         {
             InitializeComponent();
+
             CustomizeUI(); // Apply modern UI styles
 
             this.Load += LoginPage_Load;
@@ -906,7 +907,18 @@ namespace CourseGuard.Frontend.Forms.Login
                 UserModel? user = loginResult.User;
                 if (user == null)
                 {
-                    CourseGuard.Frontend.Theme.MetaTheme.ShowModernDialog("Tên đăng nhập hoặc mật khẩu không đúng!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    if (AuthService.LastErrorMessage == "Lỗi gửi mail OTP")
+                    {
+                        DialogResult thulai = MessageBox.Show("Lỗi mạng hoặc sai mật khẩu mail", "Lỗi gửi", MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
+                        if (thulai == DialogResult.Retry)
+                        {
+                            btnLogin.PerformClick();
+                        }
+                    }
+                    else
+                    {
+                        CourseGuard.Frontend.Theme.MetaTheme.ShowModernDialog("Tên đăng nhập hoặc mật khẩu không đúng!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                     return;
                 }
 
@@ -1027,16 +1039,6 @@ namespace CourseGuard.Frontend.Forms.Login
         private static void LogLoginTiming(string stage, Stopwatch stopwatch)
         {
             Debug.WriteLine($"[LOGIN_PERF] {stage}: {stopwatch.ElapsedMilliseconds} ms");
-        }
-
-        private void LOGO_Click(object sender, EventArgs e)
-        {
-
-        }
-
-        private void LoginPage_Load_1(object sender, EventArgs e)
-        {
-
         }
 
         public UserModel? CurrentUser { get; private set; }
