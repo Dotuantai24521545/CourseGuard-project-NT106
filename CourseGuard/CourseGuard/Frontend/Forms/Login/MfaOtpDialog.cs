@@ -261,6 +261,7 @@ namespace CourseGuard.Frontend.Forms.Login
         private async void BtnConfirm_Click(object? sender, EventArgs e)
         {
             string otp = _txtOtp.Text.Trim();
+
             if (string.IsNullOrWhiteSpace(otp))
             {
                 MetaTheme.ShowModernDialog("Vui lòng nhập mã OTP!");
@@ -278,22 +279,33 @@ namespace CourseGuard.Frontend.Forms.Login
             try
             {
                 Cursor = Cursors.WaitCursor;
-                bool mfaSuccess = await Task.Run(() => _authController.VerifyMfaOtp(_userId, otp));
-                if (mfaSuccess)
+                bool isSuccess = await Task.Run(() => _authController.VerifyMfaOtp(_userId, otp));
+
+                if (isSuccess)
                 {
                     this.DialogResult = DialogResult.OK;
                     this.Close();
                 }
                 else
                 {
-                    MetaTheme.ShowModernDialog("Mã OTP không chính xác hoặc đã hết hạn!", "Lỗi xác thực", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    _txtOtp.Focus();
-                    _txtOtp.SelectAll();
+                    string errorMessage = string.IsNullOrWhiteSpace(_authController.LastErrorMessage) ? "Sai mã OTP" : _authController.LastErrorMessage;
+                    MetaTheme.ShowModernDialog(errorMessage, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                    if (errorMessage.Contains("bị khóa"))
+                    {
+                        this.DialogResult = DialogResult.Cancel;
+                        this.Close();
+                    }
+                    else
+                    {
+                        _txtOtp.Focus();
+                        _txtOtp.SelectAll();
+                    }
                 }
             }
             catch (Exception ex)
             {
-                MetaTheme.ShowModernDialog("Lỗi xác thực OTP: " + ex.Message, "Lỗi Hệ Thống", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                MetaTheme.ShowModernDialog("Lỗi: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Stop);
             }
             finally
             {

@@ -197,11 +197,12 @@ namespace CourseGuard.Backend.Controllers
                 "Neu ban khong thuc hien yeu cau nay, vui long doi mat khau ngay lap tuc.\n\n" +
                 "CourseGuard Security Team";
 
-            EmailQueueService.QueueEmail(
-                user.Email,
-                "CourseGuard - Xac thuc dang nhap OTP",
-                emailBody);
-
+            var emailResult = await EmailQueueService.QueueEmail(user.Email, "CourseGuard - Xac thuc dang nhap OTP", emailBody);
+            if (!emailResult.Success)
+            {
+                LastErrorMessage = "Lỗi gửi mail OTP";
+                return LoginResultModel.Failed();
+            }
             return LoginResultModel.MfaRequired(user);
         }
 
@@ -216,7 +217,26 @@ namespace CourseGuard.Backend.Controllers
 
         public bool VerifyMfaOtp(int userId, string otp)
         {
-            return _dbContext.VerifyMfaOtp(userId, otp);
+            bool isValid = _dbContext.VerifyMfaOtp(userId, otp);
+
+            if (!isValid)
+            {
+                _dbContext.IncrementFailedAttempts(userId);
+                var updatedUser = _dbContext.GetUserById(userId);
+
+                if (updatedUser != null && updatedUser.LockoutUntil.HasValue && updatedUser.LockoutUntil.Value > DateTime.Now)
+                {
+                    LastErrorMessage = "Tài khoản đã bị khóa do nhập sai OTP quá nhiều lần.";
+                }
+                else
+                {
+                    LastErrorMessage = "Mã OTP không chính xác hoặc đã hết hạn.";
+                }
+                return false;
+            }
+
+            _dbContext.ResetFailedAttempts(userId);
+            return true;
         }
 
         public LoginResultModel CompleteMfaLogin(UserModel user)

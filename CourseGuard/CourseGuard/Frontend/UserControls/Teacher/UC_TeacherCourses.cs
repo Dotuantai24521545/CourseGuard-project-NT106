@@ -40,11 +40,16 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             AddHeaderAction(_submitButton);
         }
 
-        protected override Task<DataTable> CreateTableAsync() => Task.Run(() =>
+        protected override async Task<DataTable> CreateTableAsync()
         {
-            _allCourses = Controller.GetCourses(TeacherId).ToList();
-            return BuildCourseTable(ApplyLocalFilters(_allCourses));
-        });
+            string tukhoa = txtSearch.Text.Trim();
+            string trangthai = cboStatusFilter.SelectedItem?.ToString() ?? "Tất cả";
+            return await Task.Run(() =>
+            {
+                _allCourses = Controller.GetCourses(TeacherId).ToList();
+                return BuildCourseTable(ApplyLocalFilters(_allCourses, tukhoa, trangthai));
+            });
+        }
 
         protected override async Task AddAsync()
         {
@@ -215,17 +220,19 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             }
         }
 
-        private IEnumerable<TeacherCourseModel> ApplyLocalFilters(IEnumerable<TeacherCourseModel> courses)
+        private IEnumerable<TeacherCourseModel> ApplyLocalFilters(IEnumerable<TeacherCourseModel> courses, string tukhoa, string trangthai)
         {
-            string keyword = txtSearch.Text.Trim();
-            string status = cboStatusFilter.SelectedItem?.ToString() ?? "Tất cả";
             IEnumerable<TeacherCourseModel> filtered = courses;
 
-            if (!string.IsNullOrWhiteSpace(keyword))
-                filtered = filtered.Where(c => (c.Name ?? string.Empty).Contains(keyword, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(tukhoa))
+            {
+                filtered = filtered.Where(c => (c.Name ?? string.Empty).Contains(tukhoa, StringComparison.OrdinalIgnoreCase));
+            }
 
-            if (status != "Tất cả")
-                filtered = filtered.Where(c => string.Equals(c.Status, status, StringComparison.OrdinalIgnoreCase));
+            if (trangthai != "Tất cả")
+            {
+                filtered = filtered.Where(c => string.Equals(c.Status, trangthai, StringComparison.OrdinalIgnoreCase));
+            }
 
             return filtered;
         }
