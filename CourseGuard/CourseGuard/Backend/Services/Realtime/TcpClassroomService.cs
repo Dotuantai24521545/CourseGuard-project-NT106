@@ -14,6 +14,7 @@ namespace CourseGuard.Backend.Services.Realtime
         private bool _isRunning;
         private CancellationTokenSource? _cts;
         private readonly object _startLock = new();
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
 
         private TcpClassroomService() { }
 
@@ -25,31 +26,32 @@ namespace CourseGuard.Backend.Services.Realtime
 
                 _cts = new CancellationTokenSource();
                 _isRunning = true;
-                
-                string? rawRelay = AppEnvironment.GetOptional("RELAY_WS_URL");
-                string wsBase = "ws://localhost:8080";
-                if (!string.IsNullOrWhiteSpace(rawRelay))
-                {
-                    wsBase = rawRelay;
-                    if (wsBase.EndsWith("/relay", StringComparison.OrdinalIgnoreCase))
-                    {
-                        wsBase = wsBase.Substring(0, wsBase.Length - 6);
-                    }
-                }
-
-                string connectionUrl = $"{wsBase}/classroom-status-relay?role=teacher";
+                var token = _cts.Token;
 
                 _ = Task.Run(async () =>
                 {
-                    var token = _cts.Token;
                     while (!token.IsCancellationRequested)
                     {
                         try
                         {
-                            _ws?.Dispose();
+                            CloseWebSocket();
+
+                            string? rawRelay = AppEnvironment.GetOptional("RELAY_WS_URL");
+                            string wsBase = "ws://localhost:8080";
+                            if (!string.IsNullOrWhiteSpace(rawRelay))
+                            {
+                                wsBase = rawRelay.TrimEnd('/');
+                                if (wsBase.EndsWith("/relay", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    wsBase = wsBase.Substring(0, wsBase.Length - 6).TrimEnd('/');
+                                }
+                            }
+
+                            string connectionUrl = $"{wsBase}/classroom-status-relay?role=teacher";
+
                             _ws = new ClientWebSocket();
                             await _ws.ConnectAsync(new Uri(connectionUrl), token);
-                            
+
                             var buffer = new byte[1024];
                             while (_ws.State == WebSocketState.Open && !token.IsCancellationRequested)
                             {
@@ -64,62 +66,89 @@ namespace CourseGuard.Backend.Services.Realtime
                         {
                             if (token.IsCancellationRequested)
                                 break;
-                            try { await Task.Delay(2000, token); } catch { }
+                            try { await Task.Delay(2000, token); } catch { break; }
                         }
                     }
+
+                    CloseWebSocket();
                 });
             }
         }
 
         public async Task BroadcastClassOpened(int sessionId)
         {
-            if (_ws == null || _ws.State != WebSocketState.Open)
-            {
-                return;
-            }
-
-            var payload = new byte[5];
-            payload[0] = 1;
-            BitConverter.GetBytes(sessionId).CopyTo(payload, 1);
-
+            await _sendLock.WaitAsync();
             try
             {
+                if (_ws == null || _ws.State != WebSocketState.Open)
+                {
+                    return;
+                }
+
+                var payload = new byte[5];
+                payload[0] = 1;
+                BitConverter.GetBytes(sessionId).CopyTo(payload, 1);
+
                 await _ws.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Binary, true, CancellationToken.None);
             }
             catch { }
+            finally
+            {
+                _sendLock.Release();
+            }
         }
 
         public async Task BroadcastClassClosed(int sessionId)
         {
-            if (_ws == null || _ws.State != WebSocketState.Open)
-            {
-                return;
-            }
-
-            var payload = new byte[5];
-            payload[0] = 0;
-            BitConverter.GetBytes(sessionId).CopyTo(payload, 1);
-
+            await _sendLock.WaitAsync();
             try
             {
+                if (_ws == null || _ws.State != WebSocketState.Open)
+                {
+                    return;
+                }
+
+                var payload = new byte[5];
+                payload[0] = 0;
+                BitConverter.GetBytes(sessionId).CopyTo(payload, 1);
+
                 await _ws.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Binary, true, CancellationToken.None);
+            }
+            catch { }
+            finally
+            {
+                _sendLock.Release();
+            }
+        }
+
+        private void CloseWebSocket()
+        {
+            try
+            {
+                if (_ws != null)
+                {
+                    if (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived)
+                    {
+                        _ws.Abort();
+                    }
+                    _ws.Dispose();
+                    _ws = null;
+                }
             }
             catch { }
         }
 
         public void Dispose()
         {
-            _cts?.Cancel();
-            if (_ws != null && _ws.State == WebSocketState.Open)
+            lock (_startLock)
             {
-                try
-                {
-                    _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None).GetAwaiter().GetResult();
-                }
-                catch { }
+                if (!_isRunning) return;
+                _isRunning = false;
+                try { _cts?.Cancel(); } catch { }
+                try { _cts?.Dispose(); } catch { }
+                _cts = null;
+                CloseWebSocket();
             }
-            _ws?.Dispose();
-            _isRunning = false;
         }
     }
 }
