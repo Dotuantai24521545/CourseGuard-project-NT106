@@ -44,6 +44,7 @@
         presenceTimers: [],
         currentScreenShareOwnerId: null,
         pendingScreenShareOwnerId: null,
+        remoteScreenStreamIds: new Map(),
         tileCache: new Map()
     };
 
@@ -75,7 +76,7 @@
             return value.filter(Boolean);
         }
 
-        return String(value || "stun:stun.l.google.com:19302")
+        return String(value || "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302")
             .split(",")
             .map((item) => item.trim())
             .filter(Boolean);
@@ -191,14 +192,19 @@
 
         tile.dataset.peerId = key;
         tile.classList.toggle("screen", !!options.screen);
-        tile.classList.toggle("muted", !!options.muted);
+        tile.classList.toggle("muted", !!options.micMuted);
         tile.classList.toggle("focused", !!options.focused);
         tile.classList.toggle("camera-off", !!options.cameraOff);
         tile.classList.toggle("strip-tile", !!options.strip);
-        video.muted = !!options.muted;
+
+        // Chỉ tắt tiếng thẻ <video> đối với video local hoặc màn hình share không tiếng, tránh làm câm tiếng của remote peer
+        video.muted = !!options. muteAudioElement;
 
         if (video.srcObject !== (stream || null)) {
             video.srcObject = stream || null;
+            if (stream) {
+                video.play().catch(() => { });
+            }
         }
 
         const avatarCircle = placeholder.querySelector(".avatar-circle");
@@ -236,32 +242,33 @@
     function renderLayout() {
         if (!canvas || !mainStage || !filmstrip || !state.config) return;
 
+        const hasScreenShare = state.screenSharing && !!state.screenStream;
         const activeKeys = new Set();
         const localName = state.config.displayName || "Bạn";
         const localKey = makePeerKey(state.config.userId || "local");
         const localTile = createTile(localKey, localName, state.localStream, {
-            muted: true,
+            muteAudioElement: true,
+            micMuted: !state.micEnabled,
             cameraOff: !state.cameraEnabled,
-            strip: state.screenSharing && !!state.screenStream
+            strip: hasScreenShare
         });
         activeKeys.add(localKey);
 
         const remoteTiles = [];
         for (const participant of state.participants.values()) {
             const participantKey = makePeerKey(participant.id);
-            if (state.screenSharing && state.screenStream && isRemoteScreenOwner(participantKey)) {
-                continue;
-            }
+            const hasCameraStream = !!(participant.cameraStream || participant.stream);
 
             const tile = createTile(participantKey, participant.displayName, participant.cameraStream || participant.stream || null, {
-                cameraOff: participant.cameraEnabled === false,
-                strip: state.screenSharing && !!state.screenStream
+                muteAudioElement: false,
+                micMuted: participant.micEnabled === false,
+                cameraOff: participant.cameraEnabled === false || !hasCameraStream,
+                strip: hasScreenShare
             });
             activeKeys.add(participantKey);
             remoteTiles.push(tile);
         }
 
-        const hasScreenShare = state.screenSharing && !!state.screenStream;
         canvas.classList.toggle("screen-share", hasScreenShare);
         canvas.classList.toggle("has-filmstrip", !hasScreenShare && remoteTiles.length > 0);
         canvas.classList.toggle("screen-share-mode", hasScreenShare);
@@ -272,6 +279,7 @@
             const screenTile = createTile("teacher-screen", screenTitle, state.screenStream, {
                 screen: true,
                 focused: true,
+                muteAudioElement: true,
                 cameraOff: false
             });
             activeKeys.add("teacher-screen");
@@ -301,14 +309,19 @@
             await startLocalMedia();
             postState("media-ready");
 
+            const onReconnected = () => {
+                post("log", { message: "Signaling reconnected, re-announcing presence..." });
+                announcePresence();
+            };
+
             if (state.config.relayWsUrl && window.CourseGuardRelaySignaling) {
                 state.signaling = new window.CourseGuardRelaySignaling(state.config, (message) => {
                     post("log", { message });
-                }, { joinedAt: state.joinedAt });
+                }, { joinedAt: state.joinedAt, onReconnected });
             } else {
                 state.signaling = new window.CourseGuardSupabaseTableSignaling(state.config, (message) => {
                     post("log", { message });
-                }, { joinedAt: state.joinedAt });
+                }, { joinedAt: state.joinedAt, onReconnected });
             }
             state.signaling.onSignal(handleSignal);
             await state.signaling.start();
@@ -381,15 +394,24 @@
             r: state.config.role,
             c: state.cameraEnabled ? 1 : 0,
             m: state.micEnabled ? 1 : 0,
+            s: isTeacher() && state.screenSharing ? 1 : 0,
+            sid: isTeacher() && state.screenStream ? state.screenStream.id : null,
             t: state.joinedAt
         };
     }
 
     function announcePresence() {
+        for (const timer of state.presenceTimers) {
+            window.clearTimeout(timer);
+        }
+        state.presenceTimers.length = 0;
+
         const delays = [0, 700, 1800, 3500];
         for (const delay of delays) {
             const timer = window.setTimeout(() => {
-                void state.signaling?.send("participant-join", compactParticipantPayload());
+                if (state.started && state.signaling) {
+                    void state.signaling.send("participant-join", compactParticipantPayload());
+                }
             }, delay);
             state.presenceTimers.push(timer);
         }
@@ -412,7 +434,7 @@
     function createPeerConnection(peerId) {
         const key = makePeerKey(peerId);
         const existing = state.peers.get(key);
-        if (existing) return existing;
+        if (existing && existing.connectionState !== "closed") return existing;
 
         const peer = new RTCPeerConnection({
             iceServers: state.config.iceServers
@@ -456,20 +478,39 @@
                 cameraEnabled: true,
                 micEnabled: true
             };
-            const isScreenTrack = event.track.kind === "video" && isScreenTrackEvent(key, participant);
+
+            const isScreenTrack = event.track.kind === "video" && isScreenTrackEvent(key, participant, stream);
             if (isScreenTrack) {
                 participant.screenStream = stream;
-                if (isRemoteScreenOwner(key) || state.pendingScreenShareOwnerId === key) {
-                    state.screenStream = stream;
-                    state.currentScreenShareOwnerId = key;
-                    state.pendingScreenShareOwnerId = null;
-                    post("screen-share-track-ready", { userId: key });
-                    postState("screen-share-track-ready");
-                }
+                state.screenStream = stream;
+                state.screenSharing = true;
+                state.currentScreenShareOwnerId = key;
+                state.pendingScreenShareOwnerId = null;
+                post("screen-share-track-ready", { userId: key });
+                postState("screen-share-track-ready");
+
+                event.track.onended = () => {
+                    if (isRemoteScreenOwner(key)) {
+                        state.screenSharing = false;
+                        state.screenStream = null;
+                        state.currentScreenShareOwnerId = null;
+                        renderLayout();
+                    }
+                };
             } else {
-                participant.cameraStream = stream;
-                participant.stream = stream;
+                if (!participant.cameraStream) {
+                    participant.cameraStream = new MediaStream();
+                }
+                // Gom cả audio và video track của camera vào chung 1 stream cho participant
+                for (const oldTrack of participant.cameraStream.getTracks()) {
+                    if (oldTrack.kind === event.track.kind && oldTrack.id !== event.track.id) {
+                        participant.cameraStream.removeTrack(oldTrack);
+                    }
+                }
+                participant.cameraStream.addTrack(event.track);
+                participant.stream = participant.cameraStream;
             }
+
             state.participants.set(key, participant);
 
             post("peer-connected", { userId: key, displayName: participant.displayName });
@@ -480,9 +521,14 @@
         peer.onconnectionstatechange = () => {
             const connectionState = peer.connectionState;
             post("peer-state", { userId: key, state: connectionState });
-            if (connectionState === "failed" || connectionState === "closed" || connectionState === "disconnected") {
-                if (connectionState !== "disconnected") {
-                    closePeer(key, true);
+            if (connectionState === "failed" || connectionState === "closed") {
+                closePeer(key, false);
+                if (isTeacher() && state.participants.has(key)) {
+                    window.setTimeout(() => {
+                        if (state.started && state.participants.has(key)) {
+                            void makeOffer(key);
+                        }
+                    }, 1500);
                 }
             }
         };
@@ -490,13 +536,20 @@
         return peer;
     }
 
-    function isScreenTrackEvent(peerId, participant) {
-        if (!state.screenSharing && !state.pendingScreenShareOwnerId && !state.currentScreenShareOwnerId) {
-            return false;
+    function isScreenTrackEvent(peerId, participant, incomingStream) {
+        const expectedStreamId = state.remoteScreenStreamIds.get(peerId);
+        if (expectedStreamId && incomingStream && incomingStream.id === expectedStreamId) {
+            return true;
         }
 
         if (state.pendingScreenShareOwnerId === peerId || isRemoteScreenOwner(peerId)) {
-            return !!participant?.cameraStream;
+            const existingVideoTracks = participant?.cameraStream?.getVideoTracks() || [];
+            if (existingVideoTracks.length > 0 && incomingStream && incomingStream.id !== participant.cameraStream.id) {
+                return true;
+            }
+            if (!participant?.cameraEnabled) {
+                return true;
+            }
         }
 
         return false;
@@ -521,6 +574,17 @@
             screenStream: existing.screenStream || null,
             stream: existing.stream || null
         });
+
+        if (row.payload?.sid) {
+            state.remoteScreenStreamIds.set(participant.id, String(row.payload.sid));
+        }
+        if (row.payload?.s === 1 && !state.screenSharing) {
+            state.screenSharing = true;
+            state.currentScreenShareOwnerId = participant.id;
+            state.pendingScreenShareOwnerId = participant.id;
+            syncRemoteScreenStream(participant.id);
+        }
+
         renderLayout();
         return participant;
     }
@@ -535,7 +599,11 @@
             return;
         }
 
-        await peer.addIceCandidate(new RTCIceCandidate(candidatePayload));
+        try {
+            await peer.addIceCandidate(new RTCIceCandidate(candidatePayload));
+        } catch {
+            // Bỏ qua candidate của phiên SDP cũ
+        }
     }
 
     async function flushPendingIceCandidates(peerId) {
@@ -548,7 +616,10 @@
 
         state.pendingIceCandidates.delete(key);
         for (const candidatePayload of queue) {
-            await peer.addIceCandidate(new RTCIceCandidate(candidatePayload));
+            try {
+                await peer.addIceCandidate(new RTCIceCandidate(candidatePayload));
+            } catch {
+            }
         }
     }
 
@@ -560,10 +631,12 @@
         try {
             const peer = createPeerConnection(key);
             const offer = await peer.createOffer();
+            if (peer.signalingState !== "stable") return;
             await peer.setLocalDescription(offer);
             await state.signaling?.send("offer", {
                 type: peer.localDescription.type,
-                sdp: peer.localDescription.sdp
+                sdp: peer.localDescription.sdp,
+                screenStreamId: isTeacher() && state.screenSharing && state.screenStream ? state.screenStream.id : null
             }, key);
         } finally {
             state.makingOffers.delete(key);
@@ -581,7 +654,8 @@
         }
 
         return peer.connectionState !== "connected"
-            && peer.connectionState !== "completed";
+            && peer.connectionState !== "completed"
+            && peer.connectionState !== "connecting";
     }
 
     async function handleSignal(row) {
@@ -607,6 +681,9 @@
             }
 
             if (type === "screen-share-state") {
+                if (row.payload?.streamId) {
+                    state.remoteScreenStreamIds.set(senderId, String(row.payload.streamId));
+                }
                 state.screenSharing = !!row.payload?.sharing;
                 state.currentScreenShareOwnerId = state.screenSharing ? senderId : null;
                 if (state.screenSharing) {
@@ -620,8 +697,11 @@
                         postState("screen-share-track-ready");
                     }
                 } else {
+                    state.remoteScreenStreamIds.delete(senderId);
                     state.pendingScreenShareOwnerId = null;
                     state.screenStream = null;
+                    const owner = state.participants.get(makePeerKey(senderId));
+                    if (owner) owner.screenStream = null;
                 }
                 post(state.screenSharing ? "screen-share-started" : "screen-share-stopped", { userId: senderId });
                 renderLayout();
@@ -648,6 +728,12 @@
             }
 
             if (type === "offer") {
+                if (row.payload?.screenStreamId) {
+                    state.remoteScreenStreamIds.set(senderId, String(row.payload.screenStreamId));
+                    state.screenSharing = true;
+                    state.currentScreenShareOwnerId = senderId;
+                    state.pendingScreenShareOwnerId = senderId;
+                }
                 upsertRemoteParticipant(row);
                 const peer = createPeerConnection(senderId);
                 const isPolite = isStudent();
@@ -662,7 +748,10 @@
                     await peer.setLocalDescription({ type: "rollback" });
                 }
 
-                await peer.setRemoteDescription(new RTCSessionDescription(row.payload));
+                await peer.setRemoteDescription(new RTCSessionDescription({
+                    type: row.payload.type,
+                    sdp: row.payload.sdp
+                }));
                 await flushPendingIceCandidates(senderId);
                 const answer = await peer.createAnswer();
                 await peer.setLocalDescription(answer);
@@ -676,8 +765,11 @@
             if (type === "answer") {
                 upsertRemoteParticipant(row);
                 const peer = state.peers.get(senderId);
-                if (peer && peer.signalingState !== "stable") {
-                    await peer.setRemoteDescription(new RTCSessionDescription(row.payload));
+                if (peer && peer.signalingState === "have-local-offer") {
+                    await peer.setRemoteDescription(new RTCSessionDescription({
+                        type: row.payload.type,
+                        sdp: row.payload.sdp
+                    }));
                     await flushPendingIceCandidates(senderId);
                 }
                 return;
@@ -711,14 +803,21 @@
         });
         renderLayout();
 
-        const shouldOffer = isTeacher() && participant.role === STUDENT_ROLE;
-
-        if (shouldOffer && shouldSendTeacherOffer(participant.id)) {
-            await makeOffer(participant.id);
+        if (isNewParticipant) {
+            await state.signaling?.send("participant-join", compactParticipantPayload(), participant.id);
         }
 
-        if (isNewParticipant) {
-            await state.signaling?.send("participant-join", compactParticipantPayload());
+        if (isTeacher() && state.screenSharing && state.screenStream) {
+            await state.signaling?.send("screen-share-state", {
+                sharing: true,
+                ownerId: state.config.userId,
+                streamId: state.screenStream.id
+            }, participant.id);
+        }
+
+        const shouldOffer = isTeacher() && participant.role === STUDENT_ROLE;
+        if (shouldOffer && shouldSendTeacherOffer(participant.id)) {
+            await makeOffer(participant.id);
         }
     }
 
@@ -743,6 +842,7 @@
             track.enabled = state.micEnabled;
         }
         post("mic-state", { enabled: state.micEnabled, fromTeacher });
+        renderLayout();
         await state.signaling?.send("media-state", { m: state.micEnabled ? 1 : 0, c: state.cameraEnabled ? 1 : 0 });
     }
 
@@ -788,11 +888,18 @@
             post("screen-share-connecting");
             postState("screen-share-connecting");
 
+            // Gửi tín hiệu kèm streamId TRƯỚC khi addTrack để học viên nhận diện chính xác luồng màn hình khi nhận Offer
+            await state.signaling?.send("screen-share-state", {
+                sharing: true,
+                ownerId: state.config.userId,
+                streamId: displayStream.id
+            });
+
             const replaceTasks = [];
-            for (const peer of state.peers.values()) {
+            for (const [peerKey, peer] of state.peers.entries()) {
                 const sender = peer._courseGuardScreenSender;
                 if (sender) {
-                    replaceTasks.push(sender.replaceTrack(screenTrack));
+                    replaceTasks.push(sender.replaceTrack(screenTrack).then(() => makeOffer(peerKey)));
                 } else {
                     peer._courseGuardScreenSender = peer.addTrack(screenTrack, displayStream);
                 }
@@ -802,7 +909,6 @@
             if (failed) throw failed.reason;
 
             screenTrack.onended = () => void stopScreenShare();
-            await state.signaling?.send("screen-share-state", { sharing: true, ownerId: state.config.userId });
             post("screen-share-started");
             post("screen-share-track-ready", { userId: state.config.userId });
             postState("screen-share-started");
@@ -864,12 +970,20 @@
             peer.onicecandidate = null;
             peer.ontrack = null;
             peer.onconnectionstatechange = null;
-            peer.close();
+            peer.onnegotiationneeded = null;
+            try { peer.close(); } catch { }
             state.peers.delete(key);
         }
         state.pendingIceCandidates.delete(key);
         if (removeParticipant) {
             state.participants.delete(key);
+            state.remoteScreenStreamIds.delete(key);
+            if (isRemoteScreenOwner(key)) {
+                state.screenSharing = false;
+                state.screenStream = null;
+                state.currentScreenShareOwnerId = null;
+            }
+            removeTile(key);
         } else {
             const participant = state.participants.get(key);
             if (participant) {
@@ -878,7 +992,6 @@
                 participant.screenStream = null;
             }
         }
-        removeTile(key);
         renderLayout();
     }
 
@@ -888,13 +1001,11 @@
                 await state.signaling.send("participant-leave", { n: state.config.displayName });
             }
         } catch {
-            // Best-effort leave notification.
         }
 
         try {
             await stopScreenShare();
         } catch {
-            // Continue cleanup even if replacing tracks fails.
         }
 
         for (const key of [...state.peers.keys()]) {
@@ -911,6 +1022,7 @@
         state.screenStream = null;
         state.participants.clear();
         state.peers.clear();
+        state.remoteScreenStreamIds.clear();
         state.announcedPeerIds.clear();
         for (const timer of state.presenceTimers) {
             window.clearTimeout(timer);
@@ -948,7 +1060,6 @@
     }
 
     function setLayoutMode(mode) {
-        state.screenSharing = mode === "screen-share" ? state.screenSharing : state.screenSharing;
         canvas?.classList.toggle("screen-share", mode === "screen-share" || state.screenSharing);
         renderLayout();
     }
