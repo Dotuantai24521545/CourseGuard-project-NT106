@@ -4,6 +4,14 @@ Tài liệu đồng bộ với baseline dev được kiểm tra ngày 19/09/2026
 
 ## 1. Kiến trúc và cấu trúc repository
 
+### Cập nhật chat ngày 15/11/2026
+
+- Khung chat đang hiển thị tự kiểm tra tin mới mỗi 2 giây qua `ChatController`, giữ kiểm tra quyền truy cập khóa học. Không cần chuyển trang để thấy tin mới; độ trễ còn phụ thuộc mạng và database.
+- Đã sửa cách đọc tên bảng và loại sự kiện trong payload Supabase Realtime. Cơ chế cập nhật định kỳ vẫn hoạt động khi WebSocket không nhận được sự kiện.
+- Đây chưa phải tích hợp xác thực Supabase cho từng tài khoản CourseGuard. Không tắt RLS hoặc cấp quyền đọc toàn bộ tin nhắn cho `anon` để chạy thử. Thay đổi này không đồng bộ việc sửa/xóa tin nhắn cũ qua cơ chế lấy tin mới.
+- Build bản sửa thành công; bộ kiểm thử offline đạt 249 ca, bỏ qua 3 ca tích hợp. Chưa xác nhận luồng chat hai tài khoản đầu-cuối sau thay đổi.
+- Email nhận OTP nằm trong bản ghi người dùng trên database; `SMTP_*` trong `.env` cấu hình bên gửi thư. Thay đổi email admin trên database chung không yêu cầu cả nhóm thay `.env`. File `.env` thật phải chia sẻ riêng, không commit.
+
 - Solution chứa client và relay: `CourseGuard/CourseGuard.slnx`.
 - Client: `CourseGuard/CourseGuard/CourseGuard.csproj`, C# / .NET 10 / Windows Forms.
 - Điểm khởi chạy: `CourseGuard/CourseGuard/Frontend/Program.cs`.
