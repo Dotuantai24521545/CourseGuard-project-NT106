@@ -3,16 +3,20 @@
         constructor(config, logger, options = {}) {
             this.config = config;
             this.log = logger ?? (() => { });
+            this.onReconnected = options.onReconnected ?? null;
             this.handlers = new Set();
             this.seenSignalIds = new Set();
             this.joinedAt = options.joinedAt || new Date().toISOString();
             this.socket = null;
             this.started = false;
             this.manuallyStopped = false;
+            this.isReconnecting = false;
             this.reconnectAttempts = 0;
-            this.maxReconnectAttempts = 3;
+            this.maxReconnectAttempts = 15;
             this.reconnectDelayMs = 2000;
             this.pendingMessages = [];
+            this.reconnectTimer = null;
+            this.hadInitialConnection = false;
         }
 
         get senderId() {
@@ -20,7 +24,7 @@
         }
 
         async start() {
-            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
                 return;
             }
 
@@ -31,6 +35,11 @@
         async stop() {
             this.manuallyStopped = true;
             this.started = false;
+            this.isReconnecting = false;
+            if (this.reconnectTimer) {
+                window.clearTimeout(this.reconnectTimer);
+                this.reconnectTimer = null;
+            }
             this.pendingMessages.length = 0;
             this.handlers.clear();
             this.seenSignalIds.clear();
@@ -41,8 +50,15 @@
 
             const socket = this.socket;
             this.socket = null;
+            socket.onopen = null;
+            socket.onmessage = null;
+            socket.onerror = null;
+            socket.onclose = null;
             if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-                socket.close(1000, "CourseGuard classroom leaving");
+                try {
+                    socket.close(1000, "CourseGuard classroom leaving");
+                } catch {
+                }
             }
         }
 
@@ -71,32 +87,41 @@
                 return;
             }
 
-            this.pendingMessages.push(message);
-            if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
-                await this.#connect();
+            if (this.pendingMessages.length < 100) {
+                this.pendingMessages.push(message);
+            }
+            if (!this.manuallyStopped && (!this.socket || this.socket.readyState === WebSocket.CLOSED)) {
+                void this.#scheduleReconnect();
             }
         }
 
         async #connect() {
             const url = this.#buildConnectionUrl();
             await new Promise((resolve, reject) => {
+                let settled = false;
                 const socket = new WebSocket(url);
                 this.socket = socket;
 
                 const timeoutId = window.setTimeout(() => {
-                    reject(new Error("Railway Classroom Relay không phản hồi khi kết nối."));
-                    try {
-                        socket.close();
-                    } catch {
-                    }
+                    if (settled) return;
+                    settled = true;
+                    try { socket.close(); } catch { }
+                    reject(new Error("Classroom Relay không phản hồi khi kết nối."));
                 }, 10000);
 
                 socket.onopen = () => {
+                    if (settled) return;
+                    settled = true;
                     window.clearTimeout(timeoutId);
+                    const wasReconnect = this.hadInitialConnection;
+                    this.hadInitialConnection = true;
                     this.started = true;
                     this.reconnectAttempts = 0;
-                    this.log("Đã kết nối Railway Classroom Relay.");
+                    this.log("Đã kết nối Classroom Relay.");
                     this.#flushPendingMessages();
+                    if (wasReconnect && typeof this.onReconnected === "function") {
+                        this.onReconnected();
+                    }
                     resolve();
                 };
 
@@ -105,12 +130,17 @@
                 };
 
                 socket.onerror = () => {
-                    this.log("Railway Classroom Relay báo lỗi WebSocket.");
+                    this.log("Classroom Relay báo lỗi WebSocket.");
                 };
 
                 socket.onclose = () => {
                     window.clearTimeout(timeoutId);
                     this.started = false;
+                    if (!settled) {
+                        settled = true;
+                        reject(new Error("Kết nối Classroom Relay đã bị đóng."));
+                        return;
+                    }
                     if (!this.manuallyStopped) {
                         void this.#scheduleReconnect();
                     }
@@ -121,12 +151,14 @@
         #buildConnectionUrl() {
             const rawUrl = String(this.config.relayWsUrl || "").trim();
             if (!rawUrl) {
-                throw new Error("Thiếu RELAY_WS_URL cho Railway Classroom Relay.");
+                throw new Error("Thiếu RELAY_WS_URL cho Classroom Relay.");
             }
 
-            const baseUrl = rawUrl.endsWith("/relay")
-                ? rawUrl.slice(0, -"/relay".length)
-                : rawUrl.replace(/\/$/, "");
+            let baseUrl = rawUrl.replace(/\/+$/, "");
+            if (baseUrl.toLowerCase().endsWith("/relay")) {
+                baseUrl = baseUrl.slice(0, -"/relay".length).replace(/\/+$/, "");
+            }
+
             const role = encodeURIComponent(String(this.config.role || ""));
             const classId = encodeURIComponent(String(this.config.sessionId || ""));
             const userId = encodeURIComponent(this.senderId);
@@ -135,24 +167,35 @@
         }
 
         async #scheduleReconnect() {
-            if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                this.log("Railway Classroom Relay đã ngắt kết nối sau 3 lần thử lại.");
+            if (this.manuallyStopped || this.isReconnecting) {
                 return;
             }
 
-            this.reconnectAttempts += 1;
-            const attempt = this.reconnectAttempts;
-            this.log(`Đang kết nối lại Railway Classroom Relay (${attempt}/${this.maxReconnectAttempts})...`);
-            await new Promise((resolve) => window.setTimeout(resolve, this.reconnectDelayMs));
-
-            if (this.manuallyStopped) {
-                return;
-            }
-
+            this.isReconnecting = true;
             try {
-                await this.#connect();
-            } catch (error) {
-                this.log(`Kết nối lại Railway Classroom Relay thất bại: ${error?.message || error}`);
+                while (!this.manuallyStopped && this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts += 1;
+                    const attempt = this.reconnectAttempts;
+                    const delay = Math.min(this.reconnectDelayMs * Math.pow(1.5, attempt - 1), 15000);
+                    this.log(`Đang kết nối lại Classroom Relay (${attempt}/${this.maxReconnectAttempts})...`);
+
+                    await new Promise((resolve) => {
+                        this.reconnectTimer = window.setTimeout(resolve, delay);
+                    });
+
+                    if (this.manuallyStopped) {
+                        return;
+                    }
+
+                    try {
+                        await this.#connect();
+                        return;
+                    } catch (error) {
+                        this.log(`Kết nối lại Classroom Relay thất bại: ${error?.message || error}`);
+                    }
+                }
+            } finally {
+                this.isReconnecting = false;
             }
         }
 
@@ -176,7 +219,6 @@
             try {
                 row = JSON.parse(text);
             } catch {
-                this.log("Bỏ qua relay message không phải JSON.");
                 return;
             }
 
@@ -188,6 +230,9 @@
             const signalId = row.id || `${row.sender_id}:${row.signal_type}:${row.created_at}:${row.receiver_id || ""}`;
             if (this.seenSignalIds.has(signalId)) {
                 return;
+            }
+            if (this.seenSignalIds.size > 2000) {
+                this.seenSignalIds.clear();
             }
             this.seenSignalIds.add(signalId);
 

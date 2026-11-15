@@ -19,6 +19,7 @@ namespace CourseGuard.Backend.Services.Realtime
         private ClientWebSocket? _ws;
         private CancellationTokenSource? _cts;
         private readonly object _lock = new();
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
         private bool _isRunning;
 
         public event EventHandler<ChatChangedEventArgs>? OnChatChanged;
@@ -38,7 +39,8 @@ namespace CourseGuard.Backend.Services.Realtime
                 }
                 _isRunning = true;
                 _cts = new CancellationTokenSource();
-                Task.Run(() => ConnectAndLoopAsync(_cts.Token));
+                var token = _cts.Token;
+                Task.Run(() => ConnectAndLoopAsync(token));
             }
         }
 
@@ -51,8 +53,8 @@ namespace CourseGuard.Backend.Services.Realtime
                     return;
                 }
                 _isRunning = false;
-                _cts?.Cancel();
-                _cts?.Dispose();
+                try { _cts?.Cancel(); } catch { }
+                try { _cts?.Dispose(); } catch { }
                 _cts = null;
                 CloseWebSocket();
             }
@@ -62,8 +64,15 @@ namespace CourseGuard.Backend.Services.Realtime
         {
             try
             {
-                _ws?.Dispose();
-                _ws = null;
+                if (_ws != null)
+                {
+                    if (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived)
+                    {
+                        _ws.Abort();
+                    }
+                    _ws.Dispose();
+                    _ws = null;
+                }
             }
             catch
             {
@@ -79,30 +88,34 @@ namespace CourseGuard.Backend.Services.Realtime
             {
                 try
                 {
+                    CloseWebSocket();
+
                     string supabaseUrl = AppEnvironment.GetRequired("SUPABASE_URL");
                     string anonKey = AppEnvironment.GetRequired("SUPABASE_ANON_KEY");
 
-                    // Chuyển đổi URL sang dạng WebSocket wss://
                     string wsUrl = $"{supabaseUrl.Replace("https://", "wss://").Replace("http://", "ws://").TrimEnd('/')}/realtime/v1/websocket?apikey={anonKey}&vsn=1.0.0";
 
                     _ws = new ClientWebSocket();
                     await _ws.ConnectAsync(new Uri(wsUrl), token);
 
-                    // Reset thời gian chờ kết nối lại khi kết nối thành công
                     reconnectDelayMs = 2000;
 
-                    // Tham gia kênh để theo dõi thay đổi bảng messages và violations
                     await JoinChannelAsync(token);
 
-                    // Chạy song song luồng gửi Heartbeat định kỳ giữ kết nối
-                    var heartbeatTask = SendHeartbeatsAsync(token);
+                    using var loopCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    var heartbeatTask = SendHeartbeatsAsync(loopCts.Token);
 
-                    // Chạy vòng lặp nhận dữ liệu từ WebSocket
-                    await ReceiveLoopAsync(token);
-
-                    await heartbeatTask;
+                    try
+                    {
+                        await ReceiveLoopAsync(loopCts.Token);
+                    }
+                    finally
+                    {
+                        loopCts.Cancel();
+                        try { await heartbeatTask; } catch { }
+                    }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     break;
                 }
@@ -111,7 +124,6 @@ namespace CourseGuard.Backend.Services.Realtime
                     Console.WriteLine($"[SupabaseRealtime] Lỗi kết nối WebSocket: {ex.Message}");
                     CloseWebSocket();
 
-                    // Chờ kết nối lại với cơ chế tăng dần thời gian (exponential backoff)
                     try
                     {
                         await Task.Delay(reconnectDelayMs, token);
@@ -122,6 +134,25 @@ namespace CourseGuard.Backend.Services.Realtime
                         break;
                     }
                 }
+            }
+
+            CloseWebSocket();
+        }
+
+        private async Task SafeSendTextAsync(string json, CancellationToken token)
+        {
+            await _sendLock.WaitAsync(token);
+            try
+            {
+                if (_ws != null && _ws.State == WebSocketState.Open)
+                {
+                    byte[] bytes = Encoding.UTF8.GetBytes(json);
+                    await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
+                }
+            }
+            finally
+            {
+                _sendLock.Release();
             }
         }
 
@@ -161,8 +192,7 @@ namespace CourseGuard.Backend.Services.Realtime
             };
 
             string json = JsonSerializer.Serialize(joinPayload);
-            byte[] bytes = Encoding.UTF8.GetBytes(json);
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
+            await SafeSendTextAsync(json, token);
         }
 
         private async Task SendHeartbeatsAsync(CancellationToken token)
@@ -172,7 +202,7 @@ namespace CourseGuard.Backend.Services.Realtime
             {
                 try
                 {
-                    await Task.Delay(30000, token); // Mỗi 30 giây
+                    await Task.Delay(30000, token);
 
                     if (_ws == null || _ws.State != WebSocketState.Open)
                     {
@@ -188,8 +218,7 @@ namespace CourseGuard.Backend.Services.Realtime
                     };
 
                     string json = JsonSerializer.Serialize(heartbeat);
-                    byte[] bytes = Encoding.UTF8.GetBytes(json);
-                    await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
+                    await SafeSendTextAsync(json, token);
                 }
                 catch
                 {
@@ -213,7 +242,6 @@ namespace CourseGuard.Backend.Services.Realtime
                     result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), token);
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, token);
                         return;
                     }
 
@@ -250,7 +278,7 @@ namespace CourseGuard.Backend.Services.Realtime
                         var data = payload["data"];
                         if (data != null)
                         {
-                            var record = data["record"];
+                            var record = data["record"] ?? data["old_record"];
                             if (record != null)
                             {
                                 if (string.Equals(table, "messages", StringComparison.OrdinalIgnoreCase))
@@ -294,7 +322,8 @@ namespace CourseGuard.Backend.Services.Realtime
                 {
                     if (string.Equals(kvp.Key, propertyName, StringComparison.OrdinalIgnoreCase))
                     {
-                        return kvp.Value?.GetValue<int>() ?? 0;
+                        if (kvp.Value == null) return 0;
+                        if (int.TryParse(kvp.Value.ToString(), out int val)) return val;
                     }
                 }
             }

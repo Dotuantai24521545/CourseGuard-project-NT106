@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CourseGuard.Backend.Config;
@@ -13,22 +15,17 @@ namespace CourseGuard.Frontend.UserControls.Classroom
 {
     /// <summary>
     /// WinForms host for the WebRTC classroom surface.
-    ///
-    /// Security boundary:
-    /// - Supabase URL/key are read from .env via AppEnvironment.
-    /// - JavaScript files do not contain hard-coded secrets.
-    /// - Runtime config is injected into the WebView2 document before page scripts run.
-    ///
-    /// UI responsiveness:
-    /// - WebView2 is initialized asynchronously with a dedicated user-data folder.
-    /// - The constructor never blocks on browser process startup.
     /// </summary>
     public sealed class WebRtcClassroomHost : UserControl
     {
         private const string WebRtcAssetsRelativePath = "Frontend\\WebRTC\\classroom.html";
+        private const string VirtualHostName = "classroom.courseguard.local";
+
         private readonly WebView2 _webView;
         private readonly WebRtcClassroomOptions _options;
+        private readonly SemaphoreSlim _initLock = new(1, 1);
         private bool _initialized;
+        private bool _isDisposed;
         private TaskCompletionSource<bool>? _navigationReady;
 
         public WebRtcClassroomHost(WebRtcClassroomOptions options)
@@ -49,77 +46,118 @@ namespace CourseGuard.Frontend.UserControls.Classroom
 
         public async Task InitializeAsync()
         {
+            if (_isDisposed) return;
+
             if (_initialized)
             {
                 await WaitForNavigationReadyAsync();
                 return;
             }
 
-            _initialized = true;
-            AppEnvironment.LoadDotEnvIfExists();
-
-            string htmlPath = ResolveClassroomHtmlPath();
-            string configScript = BuildConfigInjectionScript();
-
-            string userDataFolder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "CourseGuard",
-                "WebView2",
-                "Classroom");
-            Directory.CreateDirectory(userDataFolder);
-
-            CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(
-                browserExecutableFolder: null,
-                userDataFolder: userDataFolder,
-                options: new CoreWebView2EnvironmentOptions(
-                    "--autoplay-policy=no-user-gesture-required --enable-media-stream --use-fake-ui-for-media-stream"));
-
-            await _webView.EnsureCoreWebView2Async(environment);
-
-            _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-            _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
-            _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
-            _webView.CoreWebView2.WebMessageReceived += (_, args) =>
+            await _initLock.WaitAsync();
+            try
             {
-                string json = args.WebMessageAsJson;
-                WebMessageReceived?.Invoke(this, json);
-                TryRaiseWebRtcStateChanged(json);
-            };
-            _webView.CoreWebView2.PermissionRequested += (_, args) =>
-            {
-                if (args.PermissionKind == CoreWebView2PermissionKind.Camera ||
-                    args.PermissionKind == CoreWebView2PermissionKind.Microphone)
+                if (_isDisposed) return;
+                if (_initialized)
                 {
-                    args.State = CoreWebView2PermissionState.Allow;
-                    args.Handled = true;
+                    await WaitForNavigationReadyAsync();
+                    return;
                 }
-            };
 
-            _navigationReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _webView.CoreWebView2.NavigationCompleted += (_, args) =>
-            {
-                if (args.IsSuccess)
-                {
-                    _navigationReady?.TrySetResult(true);
-                }
-                else
-                {
-                    _navigationReady?.TrySetException(new InvalidOperationException(
-                        $"Không thể tải WebRTC media canvas: {args.WebErrorStatus}"));
-                }
-            };
+                _navigationReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                AppEnvironment.LoadDotEnvIfExists();
 
-            await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(configScript);
-            _webView.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
+                string htmlPath = ResolveClassroomHtmlPath();
+                string assetsFolder = Path.GetDirectoryName(htmlPath)
+                    ?? throw new InvalidOperationException("Không xác định được thư mục chứa tài nguyên WebRTC.");
+                string configScript = BuildConfigInjectionScript();
+
+                // Tách thư mục profile theo UserId để tránh xung đột file lock khi mở 2 tài khoản hoặc đóng/mở phòng nhanh
+                string userDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "CourseGuard",
+                    "WebView2",
+                    $"Classroom_User_{_options.UserId}");
+                Directory.CreateDirectory(userDataFolder);
+
+                CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: userDataFolder,
+                    options: new CoreWebView2EnvironmentOptions(
+                        "--autoplay-policy=no-user-gesture-required --enable-features=WebRtcHideLocalIpsWithMdns"));
+
+                await _webView.EnsureCoreWebView2Async(environment);
+
+                // Ánh xạ thư mục local thành domain HTTPS ảo để WebRTC (Camera/Mic/ScreenShare) chạy trong Secure Context chuẩn
+                _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                    VirtualHostName,
+                    assetsFolder,
+                    CoreWebView2HostResourceAccessKind.Allow);
+
+                _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
+
+                _webView.CoreWebView2.WebMessageReceived += OnCoreWebMessageReceived;
+                _webView.CoreWebView2.PermissionRequested += OnCorePermissionRequested;
+                _webView.CoreWebView2.NavigationCompleted += OnCoreNavigationCompleted;
+
+                await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(configScript);
+                _initialized = true;
+
+                _webView.CoreWebView2.Navigate($"https://{VirtualHostName}/classroom.html");
+            }
+            catch (Exception ex)
+            {
+                _navigationReady?.TrySetException(ex);
+                throw;
+            }
+            finally
+            {
+                _initLock.Release();
+            }
+
             await WaitForNavigationReadyAsync();
+        }
+
+        private void OnCoreWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
+        {
+            if (_isDisposed) return;
+            string json = args.WebMessageAsJson;
+            WebMessageReceived?.Invoke(this, json);
+            TryRaiseWebRtcStateChanged(json);
+        }
+
+        private static void OnCorePermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs args)
+        {
+            if (args.PermissionKind == CoreWebView2PermissionKind.Camera ||
+                args.PermissionKind == CoreWebView2PermissionKind.Microphone ||
+                args.PermissionKind == CoreWebView2PermissionKind.Autoplay)
+            {
+                args.State = CoreWebView2PermissionState.Allow;
+                args.Handled = true;
+            }
+        }
+
+        private void OnCoreNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs args)
+        {
+            if (args.IsSuccess)
+            {
+                _navigationReady?.TrySetResult(true);
+            }
+            else
+            {
+                _navigationReady?.TrySetException(new InvalidOperationException(
+                    $"Không thể tải WebRTC media canvas: {args.WebErrorStatus}"));
+            }
         }
 
         public async Task StartAsync()
         {
             await InitializeAsync();
 
-            if (_webView.CoreWebView2 is null)
+            if (_isDisposed || _webView.CoreWebView2 is null)
             {
                 return;
             }
@@ -129,12 +167,19 @@ namespace CourseGuard.Frontend.UserControls.Classroom
 
         public async Task LeaveAsync()
         {
-            if (_webView.CoreWebView2 is null)
+            if (_isDisposed || !_initialized || _webView.CoreWebView2 is null)
             {
                 return;
             }
 
-            await ExecuteClassroomCommandAsync("cleanup", true);
+            try
+            {
+                await ExecuteClassroomCommandAsync("cleanup", true);
+            }
+            catch
+            {
+                // Bỏ qua lỗi nếu WebView2 đang đóng
+            }
         }
 
         public async Task SetMicEnabledAsync(bool enabled)
@@ -163,6 +208,7 @@ namespace CourseGuard.Frontend.UserControls.Classroom
 
         public async Task StopScreenShareAsync()
         {
+            if (_isDisposed || !_initialized) return;
             await ExecuteClassroomCommandAsync("stopScreenShare");
         }
 
@@ -194,38 +240,58 @@ namespace CourseGuard.Frontend.UserControls.Classroom
 
         private async Task ExecuteClassroomCommandAsync(string commandName, params object?[] args)
         {
-            if (_webView.CoreWebView2 is null)
+            if (_isDisposed || _webView.CoreWebView2 is null)
             {
                 return;
             }
 
             await WaitForNavigationReadyAsync();
 
+            if (_isDisposed || _webView.CoreWebView2 is null)
+            {
+                return;
+            }
+
             string commandJson = JsonSerializer.Serialize(commandName, JsonOptions);
             string argsJson = JsonSerializer.Serialize(args, JsonOptions);
-            string script = $"(async () => {{ const api = window.CourseGuardWebRtcClassroom; if (!api || typeof api[{commandJson}] !== 'function') {{ throw new Error('WebRTC API chưa sẵn sàng: ' + {commandJson}); }} return await api[{commandJson}](...{argsJson}); }})()";
+            string script = $"(async () => {{ const api = window.CourseGuardWebRtcClassroom; if (!api || typeof api[{commandJson}] !== 'function') {{ return; }} return await api[{commandJson}](...{argsJson}); }})()";
             await _webView.CoreWebView2.ExecuteScriptAsync(script);
         }
 
-
         protected override void Dispose(bool disposing)
         {
+            if (_isDisposed)
+            {
+                base.Dispose(disposing);
+                return;
+            }
+
+            _isDisposed = true;
+
             if (disposing)
             {
                 try
                 {
                     if (_webView.CoreWebView2 is not null)
                     {
-                        _ = _webView.CoreWebView2.ExecuteScriptAsync(
-                            "window.CourseGuardWebRtcClassroom?.cleanup?.(true);");
+                        _webView.CoreWebView2.WebMessageReceived -= OnCoreWebMessageReceived;
+                        _webView.CoreWebView2.PermissionRequested -= OnCorePermissionRequested;
+                        _webView.CoreWebView2.NavigationCompleted -= OnCoreNavigationCompleted;
                     }
                 }
                 catch
                 {
-                    // Dispose must remain best-effort and never block form closing.
                 }
 
-                _webView.Dispose();
+                try
+                {
+                    _webView.Dispose();
+                }
+                catch
+                {
+                }
+
+                _initLock.Dispose();
             }
 
             base.Dispose(disposing);
@@ -285,11 +351,10 @@ namespace CourseGuard.Frontend.UserControls.Classroom
             }
             catch
             {
-                // Ignore malformed script messages; raw messages are still forwarded for diagnostics.
             }
         }
 
-        private string ResolveClassroomHtmlPath()
+        private static string ResolveClassroomHtmlPath()
         {
             string outputCandidate = Path.Combine(AppContext.BaseDirectory, WebRtcAssetsRelativePath);
             if (File.Exists(outputCandidate))
@@ -305,6 +370,18 @@ namespace CourseGuard.Frontend.UserControls.Classroom
                 return sourceCandidate;
             }
 
+            // Fallback tìm ngược lên thư mục gốc của project khi chạy debug từ bin/Debug/net...
+            DirectoryInfo? dir = new(AppContext.BaseDirectory);
+            while (dir != null)
+            {
+                string candidate = Path.Combine(dir.FullName, WebRtcAssetsRelativePath);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+                dir = dir.Parent;
+            }
+
             throw new FileNotFoundException(
                 "Không tìm thấy classroom.html. Hãy kiểm tra Frontend/WebRTC assets có được copy ra output chưa.",
                 outputCandidate);
@@ -314,11 +391,11 @@ namespace CourseGuard.Frontend.UserControls.Classroom
         {
             var config = new
             {
-                supabaseUrl = AppEnvironment.GetOptional("SUPABASE_URL") ?? string.Empty,
-                supabaseAnonKey = AppEnvironment.GetOptional("SUPABASE_ANON_KEY") ?? string.Empty,
-                signalingMode = AppEnvironment.GetOptional("WEBRTC_SIGNALING_MODE") ?? "table",
-                relayWsUrl = AppEnvironment.GetOptional("RELAY_WS_URL") ?? string.Empty,
-                stunUrls = AppEnvironment.GetOptional("WEBRTC_STUN_URLS") ?? "stun:stun.l.google.com:19302",
+                supabaseUrl = (AppEnvironment.GetOptional("SUPABASE_URL") ?? string.Empty).Trim(),
+                supabaseAnonKey = (AppEnvironment.GetOptional("SUPABASE_ANON_KEY") ?? string.Empty).Trim(),
+                signalingMode = (AppEnvironment.GetOptional("WEBRTC_SIGNALING_MODE") ?? "table").Trim(),
+                relayWsUrl = (AppEnvironment.GetOptional("RELAY_WS_URL") ?? string.Empty).Trim(),
+                stunUrls = AppEnvironment.GetOptional("WEBRTC_STUN_URLS") ?? "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302",
                 iceServers = BuildIceServers(),
                 sessionId = _options.SessionId,
                 roomId = _options.RoomId,
@@ -328,18 +405,14 @@ namespace CourseGuard.Frontend.UserControls.Classroom
                 avatarPath = _options.AvatarPath
             };
 
-            string json = JsonSerializer.Serialize(config, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
-
+            string json = JsonSerializer.Serialize(config, JsonOptions);
             return $"window.__COURSEGUARD_WEBRTC_CONFIG__ = {json};";
         }
 
         private static object[] BuildIceServers()
         {
-            var servers = new System.Collections.Generic.List<object>();
-            string stunUrls = AppEnvironment.GetOptional("WEBRTC_STUN_URLS") ?? "stun:stun.l.google.com:19302";
+            var servers = new List<object>();
+            string stunUrls = AppEnvironment.GetOptional("WEBRTC_STUN_URLS") ?? "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302";
             foreach (string url in SplitCsv(stunUrls))
             {
                 servers.Add(new { urls = url });

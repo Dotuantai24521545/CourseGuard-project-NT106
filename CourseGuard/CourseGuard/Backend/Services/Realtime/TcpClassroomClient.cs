@@ -23,6 +23,8 @@ namespace CourseGuard.Backend.Services.Realtime
         private readonly string _host;
         private ClientWebSocket? _ws;
         private CancellationTokenSource? _cts;
+        private readonly object _lock = new();
+        private bool _isRunning;
 
         public event EventHandler<ClassStatusEventArgs>? ClassStatusChanged;
 
@@ -33,71 +35,113 @@ namespace CourseGuard.Backend.Services.Realtime
 
         public async Task StartAsync()
         {
-            _cts = new CancellationTokenSource();
-            while (!_cts.Token.IsCancellationRequested)
+            CancellationToken token;
+            lock (_lock)
             {
-                try
+                if (_isRunning) return;
+                _isRunning = true;
+                _cts = new CancellationTokenSource();
+                token = _cts.Token;
+            }
+
+            try
+            {
+                while (!token.IsCancellationRequested)
                 {
-                    _ws?.Dispose();
-                    _ws = new ClientWebSocket();
-
-                    string? rawRelay = AppEnvironment.GetOptional("RELAY_WS_URL");
-                    string wsBase = "ws://localhost:8080";
-                    if (!string.IsNullOrWhiteSpace(rawRelay))
+                    try
                     {
-                        wsBase = rawRelay;
-                        if (wsBase.EndsWith("/relay", StringComparison.OrdinalIgnoreCase))
+                        CloseWebSocket();
+                        _ws = new ClientWebSocket();
+
+                        string? rawRelay = AppEnvironment.GetOptional("RELAY_WS_URL");
+                        string wsBase = $"ws://{_host}:8080";
+                        if (!string.IsNullOrWhiteSpace(rawRelay))
                         {
-                            wsBase = wsBase.Substring(0, wsBase.Length - 6);
+                            wsBase = rawRelay.TrimEnd('/');
+                            if (wsBase.EndsWith("/relay", StringComparison.OrdinalIgnoreCase))
+                            {
+                                wsBase = wsBase.Substring(0, wsBase.Length - 6).TrimEnd('/');
+                            }
                         }
-                    }
 
-                    string connectionUrl = $"{wsBase}/classroom-status-relay?role=student";
-                    await _ws.ConnectAsync(new Uri(connectionUrl), _cts.Token);
+                        string connectionUrl = $"{wsBase}/classroom-status-relay?role=student";
+                        await _ws.ConnectAsync(new Uri(connectionUrl), token);
 
-                    var payload = new byte[5];
-                    while (!_cts.Token.IsCancellationRequested && _ws.State == WebSocketState.Open)
-                    {
-                        using var ms = new MemoryStream();
-                        WebSocketReceiveResult result;
-                        do
+                        var payload = new byte[5];
+                        while (!token.IsCancellationRequested && _ws.State == WebSocketState.Open)
                         {
-                            var segment = new ArraySegment<byte>(payload);
-                            result = await _ws.ReceiveAsync(segment, _cts.Token);
+                            using var ms = new MemoryStream();
+                            WebSocketReceiveResult result;
+                            do
+                            {
+                                var segment = new ArraySegment<byte>(payload);
+                                result = await _ws.ReceiveAsync(segment, token);
+                                if (result.MessageType == WebSocketMessageType.Close)
+                                {
+                                    break;
+                                }
+                                await ms.WriteAsync(payload, 0, result.Count, token);
+                            }
+                            while (!result.EndOfMessage);
+
                             if (result.MessageType == WebSocketMessageType.Close)
                             {
                                 break;
                             }
-                            await ms.WriteAsync(payload, 0, result.Count, _cts.Token);
-                        }
-                        while (!result.EndOfMessage);
 
-                        if (result.MessageType == WebSocketMessageType.Close)
-                        {
-                            break;
-                        }
-
-                        byte[] data = ms.ToArray();
-                        if (data.Length == 5)
-                        {
-                            bool isOpened = data[0] == 1;
-                            int sessionId = BitConverter.ToInt32(data, 1);
-                            ClassStatusChanged?.Invoke(this, new ClassStatusEventArgs(sessionId, isOpened));
+                            byte[] data = ms.ToArray();
+                            if (data.Length == 5)
+                            {
+                                bool isOpened = data[0] == 1;
+                                int sessionId = BitConverter.ToInt32(data, 1);
+                                ClassStatusChanged?.Invoke(this, new ClassStatusEventArgs(sessionId, isOpened));
+                            }
                         }
                     }
+                    catch
+                    {
+                        if (token.IsCancellationRequested) break;
+                        try { await Task.Delay(2000, token); } catch { break; }
+                    }
                 }
-                catch
+            }
+            finally
+            {
+                CloseWebSocket();
+                lock (_lock)
                 {
-                    if (_cts.Token.IsCancellationRequested) break;
-                    try { await Task.Delay(2000, _cts.Token); } catch { }
+                    _isRunning = false;
                 }
             }
         }
 
+        private void CloseWebSocket()
+        {
+            try
+            {
+                if (_ws != null)
+                {
+                    if (_ws.State == WebSocketState.Open || _ws.State == WebSocketState.CloseReceived)
+                    {
+                        _ws.Abort();
+                    }
+                    _ws.Dispose();
+                    _ws = null;
+                }
+            }
+            catch { }
+        }
+
         public void Dispose()
         {
-            _cts?.Cancel();
-            _ws?.Dispose();
+            lock (_lock)
+            {
+                _isRunning = false;
+                try { _cts?.Cancel(); } catch { }
+                try { _cts?.Dispose(); } catch { }
+                _cts = null;
+                CloseWebSocket();
+            }
         }
     }
 }

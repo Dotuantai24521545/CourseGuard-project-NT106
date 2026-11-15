@@ -7,6 +7,7 @@
 
             this.config = config;
             this.log = logger ?? (() => { });
+            this.onReconnected = options.onReconnected ?? null;
             this.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, {
                 auth: { persistSession: false, autoRefreshToken: false }
             });
@@ -15,7 +16,8 @@
             this.handlers = new Set();
             this.seenSignalIds = new Set();
             this.joinedAt = options.joinedAt || new Date().toISOString();
-            this.startedAt = new Date(Date.now() - 120000).toISOString(); // Fetch signals from 2 minutes ago to prevent clock skew
+            this.startedAt = new Date(Date.now() - 120000).toISOString();
+            this.hadInitialSubscription = false;
         }
 
         get roomId() {
@@ -32,12 +34,16 @@
             }
 
             const subscribed = new Promise((resolve, reject) => {
+                let settled = false;
                 const timeoutId = window.setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
                     reject(new Error("Supabase Realtime không phản hồi khi tham gia phòng."));
                 }, 10000);
 
+                // Dùng tên channel cố định theo roomId + senderId để tránh nhân đôi subscription
                 this.channel = this.client
-                    .channel(`courseguard-webrtc-${this.roomId}-${this.senderId}-${Date.now()}`)
+                    .channel(`courseguard-webrtc-${this.roomId}-${this.senderId}`)
                     .on(
                         "postgres_changes",
                         {
@@ -52,8 +58,16 @@
                         this.log(`Supabase Realtime: ${status}`);
                         if (status === "SUBSCRIBED") {
                             window.clearTimeout(timeoutId);
-                            resolve(status);
-                        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                            const wasReconnect = this.hadInitialSubscription;
+                            this.hadInitialSubscription = true;
+                            if (!settled) {
+                                settled = true;
+                                resolve(status);
+                            } else if (wasReconnect && typeof this.onReconnected === "function") {
+                                this.onReconnected();
+                            }
+                        } else if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") && !settled) {
+                            settled = true;
                             window.clearTimeout(timeoutId);
                             reject(new Error(`Supabase Realtime lỗi: ${status}`));
                         }
@@ -84,12 +98,13 @@
         }
 
         async stop() {
-            if (!this.channel) {
-                return;
+            if (this.channel) {
+                try {
+                    await this.client.removeChannel(this.channel);
+                } catch {
+                }
+                this.channel = null;
             }
-
-            await this.client.removeChannel(this.channel);
-            this.channel = null;
             this.handlers.clear();
             this.seenSignalIds.clear();
         }
@@ -122,6 +137,9 @@
                 return;
             }
 
+            if (this.seenSignalIds.size > 2000) {
+                this.seenSignalIds.clear();
+            }
             this.seenSignalIds.add(row.id);
 
             if (String(row.sender_id) === this.senderId) {
