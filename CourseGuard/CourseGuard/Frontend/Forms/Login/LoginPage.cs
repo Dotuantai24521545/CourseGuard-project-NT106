@@ -926,7 +926,7 @@ namespace CourseGuard.Frontend.Forms.Login
                 {
                     using (var otpDialog = new MfaOtpDialog(user.Id, AuthService))
                     {
-                        if (otpDialog.ShowDialog() != DialogResult.OK)
+                        if (otpDialog.ShowDialog(this) != DialogResult.OK)
                         {
                             return;
                         }
