@@ -205,6 +205,71 @@ namespace CourseGuard.Backend.Security
             return LoadAll(attemptId).Count == 0;
         }
 
+        public static int ApplyCachedAnswersToSession<TQuestion>(
+            int attemptId,
+            IEnumerable<TQuestion>? questions,
+            Func<TQuestion, int> getQuestionId,
+            Action<TQuestion, string> setSelectedOption)
+        {
+            ArgumentNullException.ThrowIfNull(getQuestionId);
+            ArgumentNullException.ThrowIfNull(setSelectedOption);
+
+            if (attemptId <= 0 || questions == null)
+            {
+                return 0;
+            }
+
+            var cachedAnswers = LoadAll(attemptId);
+            if (cachedAnswers.Count == 0)
+            {
+                return 0;
+            }
+
+            var latestByQuestionId = new Dictionary<int, CachedAnswer>();
+            foreach (var cached in cachedAnswers)
+            {
+                if (cached.QuestionId <= 0 || string.IsNullOrWhiteSpace(cached.SelectedOption))
+                {
+                    continue;
+                }
+
+                if (!latestByQuestionId.TryGetValue(cached.QuestionId, out var existing) ||
+                    cached.AnsweredAt >= existing.AnsweredAt)
+                {
+                    latestByQuestionId[cached.QuestionId] = cached;
+                }
+            }
+
+            int restoredCount = 0;
+            foreach (var question in questions)
+            {
+                int questionId = getQuestionId(question);
+                if (latestByQuestionId.TryGetValue(questionId, out var cached))
+                {
+                    setSelectedOption(question, cached.SelectedOption.Trim().ToUpperInvariant());
+                    restoredCount++;
+                }
+            }
+
+            return restoredCount;
+        }
+
+#if WINDOWS
+        public static int ApplyCachedAnswersToSession(CourseGuard.Backend.Models.StudentExamTakingModel? session)
+        {
+            if (session == null || session.AttemptId <= 0 || session.Questions.Count == 0)
+            {
+                return 0;
+            }
+
+            return ApplyCachedAnswersToSession(
+                session.AttemptId,
+                session.Questions,
+                q => q.Id,
+                (q, option) => q.SelectedOption = option);
+        }
+#endif
+
         private static byte[] Encrypt(byte[] data, int attemptId)
         {
             byte[] key = GetKey(attemptId);

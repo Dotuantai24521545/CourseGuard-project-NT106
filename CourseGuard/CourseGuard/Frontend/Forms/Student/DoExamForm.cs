@@ -32,6 +32,7 @@ namespace CourseGuard.Frontend.Forms.Student
         private bool _connectionLostViolationRecorded;
         private bool _autoSubmitTriggered;
         private bool _isShowingSubmitConfirmation;
+        private bool _resourcesCleanedUp;
         private Label _progressLabel = null!;
         private Label _saveStatusLabel = null!;
 
@@ -84,9 +85,36 @@ namespace CourseGuard.Frontend.Forms.Student
             HandleViolationAsync("KEY_PRESS", "RECORDED_AUTOMATICALLY").FireAndForgetSafe(this);
         }
 
+        private bool ShouldIgnoreDeactivateViolation()
+        {
+            return _submitted
+                || _autoSubmitTriggered
+                || _isShowingSubmitConfirmation
+                || _allowCloseWithoutSubmit
+                || (_pnlLock != null && _pnlLock.Visible);
+        }
+
+        private DialogResult ShowExamDialog(
+            string message,
+            string title = "Thông báo",
+            MessageBoxButtons buttons = MessageBoxButtons.OK,
+            MessageBoxIcon icon = MessageBoxIcon.Information)
+        {
+            bool previous = _isShowingSubmitConfirmation;
+            _isShowingSubmitConfirmation = true;
+            try
+            {
+                return MetaTheme.ShowModernDialog(this, message, title, buttons, icon);
+            }
+            finally
+            {
+                _isShowingSubmitConfirmation = previous;
+            }
+        }
+
         private void DoExamForm_Deactivate(object? sender, EventArgs e)
         {
-            if (_submitted || _autoSubmitTriggered || _isShowingSubmitConfirmation)
+            if (ShouldIgnoreDeactivateViolation())
                 return;
 
             if (this.IsDisposed || !this.IsHandleCreated)
@@ -228,6 +256,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 return;
             }
 
+            int restoredFromCache = LocalAnswerCache.ApplyCachedAnswersToSession(_session);
             lblExamName.Text = _session.ExamTitle;
             Text = $"Làm bài - {_session.ExamTitle}";
             BuildQuestionButtons();
@@ -237,12 +266,17 @@ namespace CourseGuard.Frontend.Forms.Student
             // _antiCheatTimer.Start();
             StartScreenMonitoring();
             UpdateProgressSummary();
+            if (restoredFromCache > 0)
+            {
+                UpdateSaveStatus(false, offline: true);
+                SyncOfflineAnswersAsync().FireAndForgetSafe(this);
+            }
         }
 
         private void ShowErrorAndClose(string message)
         {
-            MetaTheme.ShowModernDialog(this, message, "Thông báo");
             _allowCloseWithoutSubmit = true;
+            ShowExamDialog(message, "Thông báo");
             Close();
         }
 
@@ -334,8 +368,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 if (IsDisposed || _submitted)
                     return;
 
-                MetaTheme.ShowModernDialog(
-                    this,
+                ShowExamDialog(
                     $"Ban da dat nguong {maxViolations} vi pham. He thong se tu dong nop bai.",
                     "Tu dong nop bai",
                     MessageBoxButtons.OK,
@@ -613,12 +646,14 @@ namespace CourseGuard.Frontend.Forms.Student
             if (_session == null || _submitted)
                 return;
 
-            // Check for unsynced offline answers
+            // Attempt an immediate flush before checking for unsynced offline answers
+            // so auto-submit (timeout / violation threshold) succeeds once connectivity returns.
+            TryFlushOfflineAnswersForSubmit();
+
             var cached = LocalAnswerCache.LoadAll(_session.AttemptId);
             if (cached.Count > 0)
             {
-                MetaTheme.ShowModernDialog(
-                    this,
+                ShowExamDialog(
                     $"Hệ thống phát hiện còn {cached.Count} câu hỏi chưa được đồng bộ lên máy chủ do lỗi mạng. Vui lòng kiểm tra lại kết nối mạng của bạn để hệ thống tự động đồng bộ trước khi nộp bài.",
                     "Lỗi nộp bài",
                     MessageBoxButtons.OK,
@@ -632,9 +667,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 int markedCount = _session.Questions.Count(q => q.IsMarkedForReview);
                 string message = ExamProgressPresenter.BuildSubmitConfirmMessage(unansweredCount, markedCount);
 
-                _isShowingSubmitConfirmation = true;
-                DialogResult res = MetaTheme.ShowModernDialog(this, message, "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                _isShowingSubmitConfirmation = false;
+                DialogResult res = ShowExamDialog(message, "Xác nhận", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (res != DialogResult.Yes)
                     return;
             }
@@ -648,7 +681,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 StudentExamSubmitResultModel result = _dbContext.SubmitStudentExamAttempt(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId);
                 if (!result.Success)
                 {
-                    MetaTheme.ShowModernDialog(this, result.Message, "Thông báo");
+                    ShowExamDialog(result.Message, "Thông báo");
                     return;
                 }
 
@@ -663,7 +696,7 @@ namespace CourseGuard.Frontend.Forms.Student
                     }
                     catch { }
                 }).FireAndForgetSafe(this);
-                MetaTheme.ShowModernDialog(this, $"Đã nộp bài. Điểm của bạn: {result.Score:0.##}/10", "Hoàn tất");
+                ShowExamDialog($"Đã nộp bài. Điểm của bạn: {result.Score:0.##}/10", "Hoàn tất");
                 Close();
             }
             finally
@@ -672,6 +705,38 @@ namespace CourseGuard.Frontend.Forms.Student
                 {
                     btnSubmit.Enabled = true;
                     btnSubmit.Text = previousSubmitText;
+                }
+            }
+        }
+
+        private void TryFlushOfflineAnswersForSubmit()
+        {
+            if (_session == null)
+                return;
+
+            var cachedAnswers = LocalAnswerCache.LoadAll(_session.AttemptId);
+            if (cachedAnswers.Count == 0)
+                return;
+
+            foreach (var cached in cachedAnswers)
+            {
+                bool synced = false;
+                try
+                {
+                    synced = _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption);
+                }
+                catch
+                {
+                    synced = false;
+                }
+
+                if (synced)
+                {
+                    LocalAnswerCache.RemoveSyncedAnswer(cached);
+                }
+                else
+                {
+                    break;
                 }
             }
         }
@@ -690,7 +755,7 @@ namespace CourseGuard.Frontend.Forms.Student
             {
                 _timer.Stop();
                 lblTimer.Text = "00:00";
-                MetaTheme.ShowModernDialog(this, "Đã hết thời gian làm bài. Hệ thống sẽ tự động nộp bài.", "Hết giờ", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ShowExamDialog("Đã hết thời gian làm bài. Hệ thống sẽ tự động nộp bài.", "Hết giờ", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 SubmitExam(confirm: false);
                 return;
             }
@@ -752,20 +817,12 @@ namespace CourseGuard.Frontend.Forms.Student
                 e.Cancel = true;
                 _screenStreamClient?.SendWarning();
                 HandleViolationAsync("EXAM_CLOSE_ATTEMPT", "RECORDED_AUTOMATICALLY").FireAndForgetSafe(this);
-                MetaTheme.ShowModernDialog(this, "Không thể tắt hoặc thu nhỏ tab kiểm tra khi đang làm bài. Vui lòng nộp bài để kết thúc phiên thi.", "Đang làm bài", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ShowExamDialog("Không thể tắt hoặc thu nhỏ tab kiểm tra khi đang làm bài. Vui lòng nộp bài để kết thúc phiên thi.", "Đang làm bài", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 RestoreExamFocus();
                 return;
             }
 
-            LowLevelKeyboardHook.Unhook();
-            LowLevelKeyboardHook.OnCheatKeyPressed -= LowLevelKeyboardHook_OnCheatKeyPressed;
-
-            _timer.Stop();
-            _antiCheatTimer.Stop();
-            _monitoringCts.Cancel();
-            if (_screenStreamClient != null)
-                _screenStreamClient.ConnectionLostThresholdReached -= HandleMonitoringConnectionLost;
-            _screenStreamClient?.Dispose();
+            CleanupExamResources();
             int? userId = UserSessionContext.CurrentUserId > 0 ? UserSessionContext.CurrentUserId : null;
             string username = UserSessionContext.CurrentUsername ?? "không xác định";
             System.Threading.Tasks.Task.Run(() =>
@@ -776,6 +833,33 @@ namespace CourseGuard.Frontend.Forms.Student
                 }
                 catch { }
             }).FireAndForgetSafe(this);
+        }
+
+        private void CleanupExamResources()
+        {
+            if (_resourcesCleanedUp)
+                return;
+
+            _resourcesCleanedUp = true;
+            LowLevelKeyboardHook.Unhook();
+            LowLevelKeyboardHook.OnCheatKeyPressed -= LowLevelKeyboardHook_OnCheatKeyPressed;
+
+            _timer.Stop();
+            _antiCheatTimer.Stop();
+            try
+            {
+                _monitoringCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            if (_screenStreamClient != null)
+            {
+                _screenStreamClient.ConnectionLostThresholdReached -= HandleMonitoringConnectionLost;
+                _screenStreamClient.Dispose();
+                _screenStreamClient = null;
+            }
         }
 
         private void AntiCheatTimer_Tick(object? sender, EventArgs e)
@@ -962,16 +1046,21 @@ namespace CourseGuard.Frontend.Forms.Student
 
                 try
                 {
-                    _screenStreamClient?.Dispose();
+                    if (_screenStreamClient != null)
+                    {
+                        _screenStreamClient.ConnectionLostThresholdReached -= HandleMonitoringConnectionLost;
+                        _screenStreamClient.Dispose();
+                        _screenStreamClient = null;
+                    }
                 }
                 catch { }
                 StartScreenMonitoring();
 
-                MetaTheme.ShowModernDialog(this, "Mở khóa thành công! Bạn có thể tiếp tục làm bài thi.", "Khôi phục bài thi", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                ShowExamDialog("Mở khóa thành công! Bạn có thể tiếp tục làm bài thi.", "Khôi phục bài thi", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
-                MetaTheme.ShowModernDialog(this, "Mã OTP khôi phục không chính xác. Vui lòng liên hệ giáo viên để lấy mã đúng.", "Lỗi xác thực", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ShowExamDialog("Mã OTP khôi phục không chính xác. Vui lòng liên hệ giáo viên để lấy mã đúng.", "Lỗi xác thực", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -990,7 +1079,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 var studentUser = await System.Threading.Tasks.Task.Run(() => _dbContext.GetUserById(studentId));
                 if (studentUser == null || string.IsNullOrWhiteSpace(studentUser.Email))
                 {
-                    MetaTheme.ShowModernDialog(this, "Không tìm thấy thông tin email đăng ký của tài khoản. Vui lòng gọi trực tiếp giáo viên coi thi.", "Lỗi gửi thư", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    ShowExamDialog("Không tìm thấy thông tin email đăng ký của tài khoản. Vui lòng gọi trực tiếp giáo viên coi thi.", "Lỗi gửi thư", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
@@ -1006,16 +1095,16 @@ namespace CourseGuard.Frontend.Forms.Student
 
                 if (result.Success)
                 {
-                    MetaTheme.ShowModernDialog(this, $"Mã OTP khôi phục đã được gửi tới email: {studentUser.Email}. Vui lòng kiểm tra hộp thư điện tử.", "Gửi thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    ShowExamDialog($"Mã OTP khôi phục đã được gửi tới email: {studentUser.Email}. Vui lòng kiểm tra hộp thư điện tử.", "Gửi thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MetaTheme.ShowModernDialog(this, $"Gửi email thất bại: {result.ErrorMessage}. Vui lòng gọi trực tiếp giáo viên.", "Lỗi gửi thư", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    ShowExamDialog($"Gửi email thất bại: {result.ErrorMessage}. Vui lòng gọi trực tiếp giáo viên.", "Lỗi gửi thư", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)
             {
-                MetaTheme.ShowModernDialog(this, $"Không thể kết nối để gửi email: {ex.Message}. Vui lòng liên hệ giáo viên trực tiếp.", "Lỗi kết nối", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                ShowExamDialog($"Không thể kết nối để gửi email: {ex.Message}. Vui lòng liên hệ giáo viên trực tiếp.", "Lỗi kết nối", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
