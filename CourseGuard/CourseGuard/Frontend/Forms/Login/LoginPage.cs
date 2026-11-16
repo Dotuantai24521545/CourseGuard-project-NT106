@@ -871,8 +871,30 @@ namespace CourseGuard.Frontend.Forms.Login
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 LogLoginTiming("start login", stopwatch);
 
-                LoginResultModel loginResult = await Task.Run(() => AuthService.LoginAsync(username, password, Environment.MachineName));
-                LogLoginTiming("auth response", stopwatch);
+                LoginResultModel loginResult;
+                while (true)
+                {
+                    loginResult = await Task.Run(() => AuthService.LoginAsync(username, password, Environment.MachineName));
+                    LogLoginTiming("auth response", stopwatch);
+
+                    if (loginResult.User == null && AuthService.LastErrorMessage == "Lỗi gửi mail OTP")
+                    {
+                        DialogResult retryResult = MessageBox.Show(
+                            this,
+                            "Lỗi mạng hoặc sai mật khẩu mail",
+                            "Lỗi gửi",
+                            MessageBoxButtons.RetryCancel,
+                            MessageBoxIcon.Error);
+
+                        if (retryResult == DialogResult.Retry)
+                        {
+                            continue;
+                        }
+                        return;
+                    }
+
+                    break;
+                }
 
                 if (loginResult.ErrorCode == LoginErrorCodes.DeviceBlocked)
                 {
@@ -907,18 +929,7 @@ namespace CourseGuard.Frontend.Forms.Login
                 UserModel? user = loginResult.User;
                 if (user == null)
                 {
-                    if (AuthService.LastErrorMessage == "Lỗi gửi mail OTP")
-                    {
-                        DialogResult thulai = MessageBox.Show("Lỗi mạng hoặc sai mật khẩu mail", "Lỗi gửi", MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
-                        if (thulai == DialogResult.Retry)
-                        {
-                            btnLogin.PerformClick();
-                        }
-                    }
-                    else
-                    {
-                        CourseGuard.Frontend.Theme.MetaTheme.ShowModernDialog("Tên đăng nhập hoặc mật khẩu không đúng!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    CourseGuard.Frontend.Theme.MetaTheme.ShowModernDialog("Tên đăng nhập hoặc mật khẩu không đúng!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
@@ -986,7 +997,6 @@ namespace CourseGuard.Frontend.Forms.Login
                 SetLoginUiBusy(false);
             }
         }
-
         private Task<string> GetLocalIPAddressAsync()
         {
             return Task.Run(() =>
