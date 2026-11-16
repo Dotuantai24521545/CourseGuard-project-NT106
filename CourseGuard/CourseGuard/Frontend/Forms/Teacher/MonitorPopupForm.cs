@@ -32,6 +32,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
         private readonly ViolationRepository _violationRepo = new();
         private readonly SupabaseStorageService _storageService = new();
         private ClientWebSocket? _ws;
+        private bool _cleanedUp;
 
         public MonitorPopupForm(int teacherId, int examId, int studentId, int attemptId)
         {
@@ -50,28 +51,43 @@ namespace CourseGuard.Frontend.Forms.Teacher
             SupabaseRealtimeChatService.Instance.OnViolationChanged += OnViolationRealtimeChanged;
             SupabaseRealtimeChatService.Instance.Start();
 
-            FormClosing += (_, _) =>
+            FormClosing += (_, _) => CleanupMonitorResources();
+        }
+
+        private void CleanupMonitorResources()
+        {
+            if (_cleanedUp)
+                return;
+
+            _cleanedUp = true;
+            if (_ws != null && _ws.State == WebSocketState.Open)
             {
-                if (_ws != null && _ws.State == WebSocketState.Open)
+                try
                 {
-                    try
-                    {
-                        string revertRateCommand = $"{_studentId}:3000";
-                        byte[] cmdBytes = System.Text.Encoding.UTF8.GetBytes(revertRateCommand);
-                        _ws.SendAsync(new ArraySegment<byte>(cmdBytes), WebSocketMessageType.Text, true, CancellationToken.None).GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        // Bỏ qua
-                    }
+                    string revertRateCommand = $"{_studentId}:3000";
+                    byte[] cmdBytes = System.Text.Encoding.UTF8.GetBytes(revertRateCommand);
+                    _ws.SendAsync(new ArraySegment<byte>(cmdBytes), WebSocketMessageType.Text, true, CancellationToken.None).GetAwaiter().GetResult();
                 }
+                catch
+                {
+                    // Bỏ qua
+                }
+            }
 
+            try
+            {
                 _cts.Cancel();
-                _ws?.Dispose();
-                _picture.Image?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
 
-                SupabaseRealtimeChatService.Instance.OnViolationChanged -= OnViolationRealtimeChanged;
-            };
+            _ws?.Dispose();
+            _ws = null;
+            _picture.Image?.Dispose();
+            _picture.Image = null;
+
+            SupabaseRealtimeChatService.Instance.OnViolationChanged -= OnViolationRealtimeChanged;
         }
 
         private void OnViolationRealtimeChanged(object? sender, ViolationChangedEventArgs e)
@@ -271,9 +287,18 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 bmp.Save(ms, ImageFormat.Jpeg);
                 byte[] imageBytes = ms.ToArray();
 
-                // 1. Upload ảnh
-                string fileName = $"violation_exam{_examId}_student{_studentId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.jpg";
-                string imageUrl = await _storageService.UploadViolationImageAsync(imageBytes, fileName);
+                // 1. Upload ảnh (fallback lưu vi phạm ngay cả khi upload ảnh lỗi)
+                string? imageUrl = null;
+                string? uploadWarning = null;
+                try
+                {
+                    string fileName = $"violation_exam{_examId}_student{_studentId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.jpg";
+                    imageUrl = await _storageService.UploadViolationImageAsync(imageBytes, fileName);
+                }
+                catch (Exception uploadEx)
+                {
+                    uploadWarning = uploadEx.Message;
+                }
 
                 // 2. Lưu database
                 var violation = new ViolationModel
@@ -289,7 +314,18 @@ namespace CourseGuard.Frontend.Forms.Teacher
 
                 // 3. Reload list
                 await LoadViolationsAsync();
-                MetaTheme.ShowModernDialog("Đã ghi nhận vi phạm thành công!", "Thành công");
+                if (uploadWarning != null)
+                {
+                    MetaTheme.ShowModernDialog(
+                        $"Đã ghi nhận vi phạm vào hệ thống, nhưng chưa tải được ảnh bằng chứng lên Storage ({uploadWarning}).",
+                        "Cảnh báo lưu ảnh",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    MetaTheme.ShowModernDialog("Đã ghi nhận vi phạm thành công!", "Thành công");
+                }
             }
             catch (Exception ex)
             {
@@ -368,24 +404,43 @@ namespace CourseGuard.Frontend.Forms.Teacher
         {
             if (e.StudentId != _studentId) return;
 
+            Bitmap? frame = null;
             try
             {
                 using var ms = new MemoryStream(e.JpegBytes);
                 using var source = Image.FromStream(ms);
-                var frame = new Bitmap(source);
-                if (IsDisposed) return;
-                
+                frame = new Bitmap(source);
+                if (IsDisposed)
+                {
+                    frame.Dispose();
+                    return;
+                }
+
                 if (InvokeRequired)
                 {
-                    BeginInvoke(new MethodInvoker(() => { if (!IsDisposed) SetFrame(frame, e.FrameType); }));
+                    Bitmap capturedFrame = frame;
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        if (IsDisposed)
+                        {
+                            capturedFrame.Dispose();
+                            return;
+                        }
+
+                        SetFrame(capturedFrame, e.FrameType);
+                    }));
+                    frame = null;
                 }
                 else
                 {
-                    SetFrame(frame, e.FrameType);
+                    Bitmap readyFrame = frame;
+                    frame = null;
+                    SetFrame(readyFrame, e.FrameType);
                 }
             }
             catch
             {
+                frame?.Dispose();
                 // Bỏ qua lỗi parse hình ảnh bị hỏng nếu có
             }
         }

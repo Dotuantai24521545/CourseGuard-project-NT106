@@ -223,10 +223,12 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 if (isChecked && i < _generatedQuestions.Count)
                 {
                     var q = _generatedQuestions[i];
+                    string editedContent = row.Cells["Content"].Value?.ToString()?.Trim() ?? string.Empty;
+                    string questionText = string.IsNullOrWhiteSpace(editedContent) ? q.Content : editedContent;
                     selectedList.Add(new TeacherExamQuestionModel
                     {
                         ExamId = _examId,
-                        QuestionText = q.Content,
+                        QuestionText = questionText,
                         OptionA = q.OptionA,
                         OptionB = q.OptionB,
                         OptionC = q.OptionC,
@@ -249,6 +251,13 @@ namespace CourseGuard.Frontend.Forms.Teacher
             try
             {
                 int added = await _controller.ImportQuestionsToExamAsync(_teacherId, _examId, _courseId, selectedList);
+                if (added <= 0)
+                {
+                    QuestionsAdded = false;
+                    MessageBox.Show("Không thể lưu câu hỏi AI. Bài kiểm tra có thể không còn ở trạng thái nháp hoặc không thuộc khóa học đã chọn.", "Không thể lưu câu hỏi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
                 QuestionsAdded = true;
                 MessageBox.Show($"Đã lưu thành công {added} câu hỏi AI vào bài thi!", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 Close();
