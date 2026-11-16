@@ -12,6 +12,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
     {
         private readonly FlowLayoutPanel _flowLayoutPanel = new();
         private readonly ConcurrentDictionary<int, StudentMonitorCard> _studentCards = new();
+        private ApiMonitorReceiver? _apiReceiver;
 
         public MonitorAllForm()
         {
@@ -27,18 +28,24 @@ namespace CourseGuard.Frontend.Forms.Teacher
             _flowLayoutPanel.BackColor = MetaTheme.Colors.FormBg;
             Controls.Add(_flowLayoutPanel);
 
-            TcpScreenMonitorService.Instance.FrameReceived += Service_FrameReceived;
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+            {
+                _apiReceiver=new();_apiReceiver.FrameReceived+=Service_FrameReceived;
+            }
+            else TcpScreenMonitorService.Instance.FrameReceived += Service_FrameReceived;
             FormClosing += MonitorAllForm_FormClosing;
         }
 
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            TcpScreenMonitorService.Instance.StartListening();
+            if(_apiReceiver is not null)_= _apiReceiver.RunAsync();
+            else TcpScreenMonitorService.Instance.StartListening();
         }
 
         private void MonitorAllForm_FormClosing(object? sender, FormClosingEventArgs e)
         {
+            if(_apiReceiver is not null){_apiReceiver.FrameReceived-=Service_FrameReceived;_apiReceiver.Dispose();}
             TcpScreenMonitorService.Instance.FrameReceived -= Service_FrameReceived;
             foreach (var card in _studentCards.Values)
             {

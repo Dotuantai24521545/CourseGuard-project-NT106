@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using CourseGuard.Backend.Services;
 
 namespace CourseGuard.Backend.Controllers
 {
@@ -24,6 +25,9 @@ namespace CourseGuard.Backend.Controllers
 
         public Dictionary<string, string> LoadSettings()
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<Dictionary<string,string>>("api/admin/settings").GetAwaiter().GetResult();
+#endif
             var settings = new Dictionary<string, string>
             {
                 { "SMTP_HOST", "smtp.gmail.com" },
@@ -77,6 +81,9 @@ namespace CourseGuard.Backend.Controllers
 
         public bool SaveSettings(Dictionary<string, string> newSettings)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.PostAsync<bool>("api/admin/settings",newSettings).GetAwaiter().GetResult();
+#endif
             string? envPath = FindFileUpwards(".env");
             if (string.IsNullOrWhiteSpace(envPath))
             {

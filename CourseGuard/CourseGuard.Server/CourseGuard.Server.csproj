@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);COURSEGUARD_SERVER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="MiniExcel" Version="1.44.1" />
+    <PackageReference Include="CsvHelper" Version="33.0.1" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <Compile Include="../CourseGuard/Backend/Controllers/TeacherController.cs" Link="Controllers/TeacherController.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/TeacherRepository.cs" Link="Data/TeacherRepository.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/ViolationRepository.cs" Link="Data/ViolationRepository.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/ScoreRepository.cs" Link="Data/ScoreRepository.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/GamificationAndScheduleService.cs" Link="Services/GamificationAndScheduleService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/DeadlineReminderService.cs" Link="Services/DeadlineReminderService.cs" />
+    <Compile Include="../CourseGuard/Backend/Controllers/CourseController.cs" Link="Controllers/CourseController.cs" />
+    <Compile Include="../CourseGuard/Backend/Controllers/SettingsController.cs" Link="Controllers/SettingsController.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/TeacherStudentExcelExportService.cs" Link="Services/TeacherStudentExcelExportService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/StudentExamAvailabilityService.cs" Link="Services/StudentExamAvailabilityService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/QuestionMetadataNormalizer.cs" Link="Services/QuestionMetadataNormalizer.cs" />
+    <Compile Include="../CourseGuard/Frontend/Helpers/CompressedChatImageResult.cs" Link="Compatibility/CompressedChatImageResult.cs" />
+    <Compile Include="../CourseGuard/Backend/Models/**/*.cs" Link="Models/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../CourseGuard/Backend/Data/CourseGuardDbContext.cs" Link="Data/CourseGuardDbContext.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/IDeadlineReminderStore.cs" Link="Data/IDeadlineReminderStore.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/DatabaseAction.cs" Link="Data/DatabaseAction.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/NotificationRepository.cs" Link="Data/NotificationRepository.cs" />
+    <Compile Include="../CourseGuard/Backend/Data/INotificationWriter.cs" Link="Data/INotificationWriter.cs" />
+    <Compile Include="../CourseGuard/Backend/Config/AppEnvironment.cs" Link="Config/AppEnvironment.cs" />
+    <Compile Include="../CourseGuard/Backend/Security/PasswordHasher.cs" Link="Security/PasswordHasher.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/SmtpEmailService.cs" Link="Services/SmtpEmailService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/ExamScoringService.cs" Link="Services/ExamScoringService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/AiQuestionGeneratorService.cs" Link="Services/AiQuestionGeneratorService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/StudentExamScoringService.cs" Link="Services/StudentExamScoringService.cs" />
+    <Compile Include="../CourseGuard/Backend/Services/Monitoring/ScreenStreamProtocol.cs" Link="Services/ScreenStreamProtocol.cs" />
+    <Compile Include="../CourseGuard/Frontend/Helpers/ChatImageHelper.cs" Link="Compatibility/ChatImageHelper.cs" />
+    <None Update=".env" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

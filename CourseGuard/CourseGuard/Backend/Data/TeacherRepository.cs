@@ -15,6 +15,9 @@ namespace CourseGuard.Backend.Data
         public TeacherRepository(CourseGuardDbContext dbContext)
         {
             _dbContext = dbContext;
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return;
+#endif
             EnsureTeacherSchema();
         }
 

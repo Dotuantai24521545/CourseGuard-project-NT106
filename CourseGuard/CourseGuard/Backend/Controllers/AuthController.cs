@@ -137,6 +137,8 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<LoginResultModel> LoginAsync(string username, string password, string? deviceName = null, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled)
+                return await ServerApiClient.LoginAsync(username, password, deviceName, cancellationToken);
             if (!UserIdentityBloomIndex.UsernameExists(_dbContext, username))
             {
                 return LoginResultModel.Failed();
@@ -216,21 +218,26 @@ namespace CourseGuard.Backend.Controllers
 
         public bool VerifyMfaOtp(int userId, string otp)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.VerifyAsync(otp).GetAwaiter().GetResult();
             return _dbContext.VerifyMfaOtp(userId, otp);
         }
 
         public LoginResultModel CompleteMfaLogin(UserModel user)
         {
+            if (ServerApiClient.Enabled)
+                return ServerApiClient.CurrentUser is { } verified ? LoginResultModel.Evaluate(verified) : LoginResultModel.Failed();
             return BuildSuccessfulLoginResult(user);
         }
 
         public Task<UserModel?> GetUserProfileAsync(string username, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<UserModel?>("api/me", cancellationToken);
             return _dbContext.GetUserByUsernameAsync(username, cancellationToken);
         }
 
         public void UpdateLoginInfo(int userId, string deviceName, string ipAddress)
         {
+            if (ServerApiClient.Enabled) { ServerApiClient.PostAsync("api/me/device", new { deviceName }).GetAwaiter().GetResult(); return; }
             try
             {
                 _dbContext.LogDeviceActivity(userId, deviceName, ipAddress);
@@ -243,6 +250,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task UpdateLoginInfoAsync(int userId, string deviceName, string ipAddress, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) { await ServerApiClient.PostAsync("api/me/device", new { deviceName }, cancellationToken); return; }
             try
             {
                 await _dbContext.LogDeviceActivityAsync(userId, deviceName, ipAddress, cancellationToken);
@@ -255,16 +263,24 @@ namespace CourseGuard.Backend.Controllers
 
         public void LogUserActivity(int? userId, string action, string details, string ipAddress)
         {
+            if (ServerApiClient.Enabled) { ServerApiClient.PostAsync("api/me/activity", new { action, details }).GetAwaiter().GetResult(); return; }
             _dbContext.LogUserActivity(userId, action, details, ipAddress);
         }
 
         public Task LogUserActivityAsync(int? userId, string action, string details, string ipAddress, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync("api/me/activity", new { action, details }, cancellationToken);
             return _dbContext.LogUserActivityAsync(userId, action, details, ipAddress, cancellationToken);
         }
 
         public bool RegisterRequest(UserModel user, string password)
         {
+            if (ServerApiClient.Enabled)
+            {
+                var result = ServerApiClient.PostAsync<AccountApiResult>("api/auth/register", new { user.Username, user.FullName, user.Email, password }).GetAwaiter().GetResult();
+                LastErrorMessage = result.Error;
+                return result.Success;
+            }
             LastErrorMessage = string.Empty;
 
             // Simple validation
@@ -323,6 +339,7 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ForgotPasswordRequest(string username, string email)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/auth/forgot-password", new { username, email }).GetAwaiter().GetResult();
             if (!UserIdentityBloomIndex.UsernameExists(_dbContext, username) ||
                 !UserIdentityBloomIndex.EmailExists(_dbContext, email))
             {
@@ -344,6 +361,7 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ChangePassword(int userId, string oldPassword, string newPassword, string ipAddress = "")
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/me/password", new { oldPassword, newPassword }).GetAwaiter().GetResult();
             LastErrorMessage = string.Empty;
             if (userId <= 0)
             {
@@ -390,6 +408,7 @@ namespace CourseGuard.Backend.Controllers
 
         public void Logout(int? userId = null, string username = "", string ipAddress = "")
         {
+            if (ServerApiClient.Enabled) { try { ServerApiClient.LogoutAsync().GetAwaiter().GetResult(); } finally { UserSessionContext.Clear(); } return; }
             // In a production app, we would clear JWT tokens or Session state.
             // For this local WinForms app, we log the event and navigate back.
             Console.WriteLine("Auth: User session cleared.");

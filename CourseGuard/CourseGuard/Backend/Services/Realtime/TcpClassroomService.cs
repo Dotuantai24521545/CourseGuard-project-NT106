@@ -25,6 +25,7 @@ namespace CourseGuard.Backend.Services.Realtime
 
                 _cts = new CancellationTokenSource();
                 _isRunning = true;
+                if(CourseGuard.Backend.Services.ServerApiClient.Enabled)return;
                 
                 string? rawRelay = AppEnvironment.GetOptional("RELAY_WS_URL");
                 string wsBase = "ws://localhost:8080";
@@ -73,6 +74,7 @@ namespace CourseGuard.Backend.Services.Realtime
 
         public async Task BroadcastClassOpened(int sessionId)
         {
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled){await CourseGuard.Backend.Services.ServerApiClient.PostAsync($"api/classroom/{sessionId}/status",new {isOpened=true});return;}
             if (_ws == null || _ws.State != WebSocketState.Open)
             {
                 return;
@@ -91,6 +93,7 @@ namespace CourseGuard.Backend.Services.Realtime
 
         public async Task BroadcastClassClosed(int sessionId)
         {
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled){await CourseGuard.Backend.Services.ServerApiClient.PostAsync($"api/classroom/{sessionId}/status",new {isOpened=false});return;}
             if (_ws == null || _ws.State != WebSocketState.Open)
             {
                 return;

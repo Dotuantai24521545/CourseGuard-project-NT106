@@ -20,6 +20,9 @@ namespace CourseGuard.Backend.Data
 
         public CourseGuardDbContext(string connectionString)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) { _connectionString = string.Empty; return; }
+#endif
             if (string.IsNullOrWhiteSpace(connectionString))
             {
                 _connectionString = AppEnvironment.GetRequired(
@@ -35,6 +38,10 @@ namespace CourseGuard.Backend.Data
 
         public NpgsqlConnection CreateConnection()
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled)
+                throw new InvalidOperationException("Thao tác này chưa được chuyển sang API; client không được kết nối database trực tiếp.");
+#endif
             return new NpgsqlConnection(_connectionString);
         }
 
@@ -432,6 +439,10 @@ namespace CourseGuard.Backend.Data
 
         public StudentProfileModel? GetStudentProfile(int userId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<StudentProfileModel?>("api/student/GetStudentProfile", new {  }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentProfileSchema(connection);
@@ -475,6 +486,9 @@ namespace CourseGuard.Backend.Data
 
         public bool UpsertStudentProfile(StudentProfileModel profile)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.PostAsync<bool>("api/student/profile",profile).GetAwaiter().GetResult();
+#endif
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentProfileSchema(connection);
@@ -663,6 +677,10 @@ namespace CourseGuard.Backend.Data
 
         public int CountActiveEnrollments(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<int>("api/student/CountActiveEnrollments", new {  }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
 
@@ -679,6 +697,10 @@ namespace CourseGuard.Backend.Data
 
         public int CountUnreadNotifications(int userId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<int>("api/me/notifications/count").GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
 
@@ -695,6 +717,10 @@ namespace CourseGuard.Backend.Data
 
         public int CountStudentScoreRecords(int userId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<int>("api/student/CountStudentScoreRecords", new {  }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentScoreSchema(connection);
@@ -711,6 +737,10 @@ namespace CourseGuard.Backend.Data
 
         public double? GetStudentAverageScore(int userId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<double?>("api/student/GetStudentAverageScore", new {  }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentScoreSchema(connection);
@@ -728,6 +758,10 @@ namespace CourseGuard.Backend.Data
 
         public double? GetStudentExamAverageScore(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<double?>("api/student/GetStudentExamAverageScore", new {  }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
 
@@ -760,16 +794,28 @@ namespace CourseGuard.Backend.Data
 
         public int CountOpenExamsForStudent(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<int>("api/student/CountOpenExamsForStudent", new {  }).GetAwaiter().GetResult();
+#endif
+
             return CountStudentExamsByAvailability(studentId, openNowOnly: true);
         }
 
         public int CountAvailableExamsForStudent(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<int>("api/student/CountAvailableExamsForStudent", new {  }).GetAwaiter().GetResult();
+#endif
+
             return CountStudentExamsByAvailability(studentId, openNowOnly: false);
         }
 
         public int CountCompletedExamsForStudent(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<int>("api/student/CountCompletedExamsForStudent", new {  }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
 
@@ -801,6 +847,10 @@ namespace CourseGuard.Backend.Data
 
         public List<StudentExamListItemModel> GetAvailableExamsForStudent(int studentId, int limit = 100)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<StudentExamListItemModel>>("api/student/GetAvailableExamsForStudent", new { limit }).GetAwaiter().GetResult();
+#endif
+
             var result = new List<StudentExamListItemModel>();
             int safeLimit = limit <= 0 ? 100 : limit;
 
@@ -899,6 +949,10 @@ namespace CourseGuard.Backend.Data
 
         public StudentExamTakingModel? StartOrResumeStudentExam(int studentId, int examId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<StudentExamTakingModel?>("api/student/StartOrResumeStudentExam", new { examId }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentExamTakingSchema(connection);
@@ -930,6 +984,10 @@ namespace CourseGuard.Backend.Data
 
         public bool SaveStudentExamAnswer(int studentId, int attemptId, int examQuestionId, string selectedOption)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/student/SaveStudentExamAnswer", new { attemptId, examQuestionId, selectedOption }).GetAwaiter().GetResult();
+#endif
+
             string option = NormalizeOption(selectedOption);
             if (string.IsNullOrEmpty(option))
                 return false;
@@ -962,6 +1020,10 @@ namespace CourseGuard.Backend.Data
 
         public StudentExamSubmitResultModel SubmitStudentExamAttempt(int studentId, int attemptId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<StudentExamSubmitResultModel>("api/student/SubmitStudentExamAttempt", new { attemptId }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentExamTakingSchema(connection);
@@ -1049,6 +1111,10 @@ namespace CourseGuard.Backend.Data
 
         public List<StudentResultCourseFilterModel> GetActiveResultCourseFiltersForStudent(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<StudentResultCourseFilterModel>>("api/student/GetActiveResultCourseFiltersForStudent", new {  }).GetAwaiter().GetResult();
+#endif
+
             var result = new List<StudentResultCourseFilterModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -1077,6 +1143,10 @@ namespace CourseGuard.Backend.Data
 
         public List<StudentResultListItemModel> GetStudentResultItems(int studentId, int? courseId = null, string? examTitleKeyword = null, int limit = 100)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<StudentResultListItemModel>>("api/student/GetStudentResultItems", new { courseId, examTitleKeyword, limit }).GetAwaiter().GetResult();
+#endif
+
             var result = new List<StudentResultListItemModel>();
             int safeLimit = limit <= 0 ? 100 : limit;
             bool hasFilter = (courseId.HasValue && courseId.Value > 0) || !string.IsNullOrWhiteSpace(examTitleKeyword);
@@ -1199,6 +1269,10 @@ namespace CourseGuard.Backend.Data
 
         public bool HideStudentResult(int studentId, int attemptId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/student/HideStudentResult", new { attemptId }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             EnsureStudentHiddenResultsSchema(connection);
@@ -1237,6 +1311,10 @@ namespace CourseGuard.Backend.Data
 
         public StudentExamReviewModel? GetStudentExamReview(int studentId, int attemptId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<StudentExamReviewModel?>("api/student/GetStudentExamReview", new { attemptId }).GetAwaiter().GetResult();
+#endif
+
             using var connection = CreateConnection();
             connection.Open();
             if (!TableExists(connection, "exam_attempts") || !TableExists(connection, "exams"))
@@ -1314,6 +1392,10 @@ namespace CourseGuard.Backend.Data
 
         public List<StudentSearchResultModel> SearchStudentGlobal(int studentId, string keyword, int limitPerGroup = 5)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<StudentSearchResultModel>>("api/student/SearchStudentGlobal", new { keyword, limitPerGroup }).GetAwaiter().GetResult();
+#endif
+
             var results = new List<StudentSearchResultModel>();
             string term = (keyword ?? string.Empty).Trim();
             if (studentId <= 0 || string.IsNullOrWhiteSpace(term))
@@ -2243,6 +2325,9 @@ namespace CourseGuard.Backend.Data
 
         public UserModel? GetUserById(int userId)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<UserModel?>("api/me").GetAwaiter().GetResult();
+#endif
             using var connection = CreateConnection();
             connection.Open();
             EnsureUserSecuritySchema(connection);
@@ -2510,6 +2595,10 @@ namespace CourseGuard.Backend.Data
 
         public HashSet<int> GetStudentEnrolledCourseIds(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<HashSet<int>>("api/student/GetStudentEnrolledCourseIds", new {  }).GetAwaiter().GetResult();
+#endif
+
             var result = new HashSet<int>();
             using var connection = CreateConnection();
             connection.Open();
@@ -2540,6 +2629,10 @@ namespace CourseGuard.Backend.Data
         /// </summary>
         public List<EnrollmentModel> GetEnrollmentsByStudent(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<EnrollmentModel>>("api/student/GetEnrollmentsByStudent", new {  }).GetAwaiter().GetResult();
+#endif
+
             var list = new List<EnrollmentModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -2581,6 +2674,10 @@ namespace CourseGuard.Backend.Data
 
         public List<StudentScheduleItemModel> GetStudentOnlineSessions(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<StudentScheduleItemModel>>("api/student/GetStudentOnlineSessions", new {  }).GetAwaiter().GetResult();
+#endif
+
             var rows = new List<StudentScheduleItemModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -2727,6 +2824,10 @@ namespace CourseGuard.Backend.Data
         /// </summary>
         public List<CourseModel> GetAvailableCourses(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<CourseModel>>("api/student/GetAvailableCourses", new {  }).GetAwaiter().GetResult();
+#endif
+
             var courses = new List<CourseModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -3050,6 +3151,9 @@ namespace CourseGuard.Backend.Data
 
         public List<ChatCourseModel> GetChatCoursesForUser(int userId)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<List<ChatCourseModel>>("api/courses").GetAwaiter().GetResult();
+#endif
             var result = new List<ChatCourseModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -3496,6 +3600,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<byte[]?> GetChatFileContentAsync(int courseId, int messageId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return await ServerApiClient.GetAsync<byte[]?>($"api/courses/{courseId}/files/{messageId}",cancellationToken);
+#endif
             if (courseId <= 0 || messageId <= 0)
             {
                 return null;
@@ -4537,6 +4644,9 @@ namespace CourseGuard.Backend.Data
 
         public AdminDashboardMetricsModel GetAdminDashboardMetrics()
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<AdminDashboardMetricsModel>("api/admin/metrics").GetAwaiter().GetResult();
+#endif
             using var connection = CreateConnection();
             connection.Open();
             EnsureAuditLogSchema(connection);
@@ -4559,6 +4669,9 @@ namespace CourseGuard.Backend.Data
 
         public List<RecentUserActivityModel> GetRecentUserActivities(int limit = 20)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<RecentUserActivityModel>>($"api/admin/activities?limit={limit}").GetAwaiter().GetResult();
+#endif
             var result = new List<RecentUserActivityModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -4602,6 +4715,9 @@ namespace CourseGuard.Backend.Data
 
         public List<RecentUserActivityModel> GetRecentUserActivitiesByUser(int userId, int limit = 10)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<List<RecentUserActivityModel>>($"api/me/activities?limit={limit}").GetAwaiter().GetResult();
+#endif
             var result = new List<RecentUserActivityModel>();
             int safeLimit = limit <= 0 ? 10 : limit;
 
@@ -4850,6 +4966,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task LogDeviceActivityAsync(int userId, string deviceName, string ipAddress, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled){await ServerApiClient.PostAsync("api/me/device",new {deviceName},cancellationToken);return;}
+#endif
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
             const string query = @"
@@ -4912,6 +5031,10 @@ namespace CourseGuard.Backend.Data
 
         public async Task<List<TeacherLessonModel>> GetStudentLessonsAsync(int studentId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<List<TeacherLessonModel>>("api/student/GetStudentLessonsAsync", new {  });
+#endif
+
             var result = new List<TeacherLessonModel>();
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
@@ -4982,6 +5105,10 @@ namespace CourseGuard.Backend.Data
 
         public async Task<byte[]?> GetStudentLessonFileContentAsync(int lessonId, int studentId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<byte[]?>("api/student/GetStudentLessonFileContentAsync", new { lessonId });
+#endif
+
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
@@ -5129,6 +5256,9 @@ namespace CourseGuard.Backend.Data
 
         public List<DeadlineReminderItem> GetUpcomingDeadlines(int userId, DateTime from, DateTime to)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<List<DeadlineReminderItem>>($"api/me/deadlines?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}").GetAwaiter().GetResult();
+#endif
             var result = new List<DeadlineReminderItem>();
             using var connection = CreateConnection();
             connection.Open();
@@ -5249,6 +5379,10 @@ namespace CourseGuard.Backend.Data
 
         public async Task<List<StudentAssignmentRow>> GetStudentAssignmentsAsync(int studentId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<List<StudentAssignmentRow>>("api/student/GetStudentAssignmentsAsync", new {  });
+#endif
+
             var result = new List<StudentAssignmentRow>();
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
@@ -5309,6 +5443,10 @@ namespace CourseGuard.Backend.Data
 
         public async Task<byte[]?> GetAssignmentContentAsync(int assignmentId, int studentId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<byte[]?>("api/student/GetAssignmentContentAsync", new { assignmentId });
+#endif
+
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
             
@@ -5332,6 +5470,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<bool> SubmitAssignmentAsync(AssignmentSubmissionModel submission, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<bool>("api/student/submissions", submission, cancellationToken);
+#endif
             await using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
@@ -5426,6 +5567,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<QuickNoteModel?> GetQuickNoteAsync(int userId, int sessionId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.GetAsync<QuickNoteModel?>($"api/me/notes/{sessionId}", cancellationToken);
+#endif
             using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
@@ -5456,6 +5600,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<bool> SaveQuickNoteAsync(QuickNoteModel note, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<bool>("api/me/notes", note, cancellationToken);
+#endif
             using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
@@ -5534,6 +5681,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<int> LogAttendanceInAsync(int studentId, int sessionId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<int>($"api/student/attendance/{sessionId}/in", new { }, cancellationToken);
+#endif
             using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
             await EnsureScheduleAttendanceSchemaAsync(connection, cancellationToken);
@@ -5579,6 +5729,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<bool> LogAttendanceOutAsync(int logId, CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<bool>($"api/student/attendance/{logId}/out", new { }, cancellationToken);
+#endif
             using var connection = CreateConnection();
             await connection.OpenAsync(cancellationToken);
             await EnsureScheduleAttendanceSchemaAsync(connection, cancellationToken);
@@ -5618,6 +5771,9 @@ namespace CourseGuard.Backend.Data
 
         public List<Models.DeviceModel> GetActiveDevices()
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<List<Models.DeviceModel>>("api/admin/devices").GetAwaiter().GetResult();
+#endif
             var list = new List<Models.DeviceModel>();
             using var connection = CreateConnection();
             connection.Open();
@@ -5647,6 +5803,9 @@ namespace CourseGuard.Backend.Data
 
         public bool UpdateDeviceStatus(int deviceId, string status)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.PostAsync<bool>($"api/admin/devices/{deviceId}/status",new {status}).GetAwaiter().GetResult();
+#endif
             using var connection = CreateConnection();
             connection.Open();
             const string query = "UPDATE DEVICES SET status = @status WHERE id = @id";
@@ -5658,6 +5817,9 @@ namespace CourseGuard.Backend.Data
 
         public bool DeleteDevice(int deviceId)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.PostAsync<bool>($"api/admin/devices/{deviceId}/delete",new {}).GetAwaiter().GetResult();
+#endif
             using var connection = CreateConnection();
             connection.Open();
             const string query = "DELETE FROM DEVICES WHERE id = @id";

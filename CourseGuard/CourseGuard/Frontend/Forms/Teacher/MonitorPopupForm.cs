@@ -116,7 +116,9 @@ namespace CourseGuard.Frontend.Forms.Teacher
 
                     string connectionUrl = $"{relayUrl}?role=teacher&examId={_examId}";
                     SetStatus("Đang kết nối tới Cloud Relay...");
-                    await _ws.ConnectAsync(new Uri(connectionUrl), _cts.Token);
+                    if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                        await CourseGuard.Backend.Services.ServerApiClient.ConnectMonitorAsync(_ws,_examId,0,_cts.Token);
+                    else await _ws.ConnectAsync(new Uri(connectionUrl), _cts.Token);
                     SetStatus("Đã kết nối tới Cloud Relay. Đang chờ camera học sinh...");
 
                     try
@@ -346,6 +348,15 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 {
                     try
                     {
+                        if(url.StartsWith("api/monitor/evidence/",StringComparison.Ordinal))
+                        {
+                            var bytes=CourseGuard.Backend.Services.ServerApiClient.GetAsync<byte[]>(url).GetAwaiter().GetResult();
+                            using var imageStream=new MemoryStream(bytes);
+                            using var decoded=Image.FromStream(imageStream);
+                            using var viewer=new Form {Text="Ảnh vi phạm",Width=900,Height=650};
+                            using var preview=new PictureBox {Dock=DockStyle.Fill,SizeMode=PictureBoxSizeMode.Zoom,Image=new Bitmap(decoded)};
+                            viewer.Controls.Add(preview);viewer.ShowDialog(this);preview.Image?.Dispose();return;
+                        }
                         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                         {
                             FileName = url,

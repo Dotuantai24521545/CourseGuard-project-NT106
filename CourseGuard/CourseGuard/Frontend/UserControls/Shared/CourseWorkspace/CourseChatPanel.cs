@@ -100,7 +100,8 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
             SupabaseRealtimeChatService.Instance.OnChatChanged += OnChatRealtimeChanged;
             if (StartRealtimeForTesting)
             {
-                SupabaseRealtimeChatService.Instance.Start();
+                if (!CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                    SupabaseRealtimeChatService.Instance.Start();
                 _chatRefreshTimer.Start();
             }
 

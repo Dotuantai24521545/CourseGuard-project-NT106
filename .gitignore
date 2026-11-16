@@ -2,6 +2,8 @@
 .vs/
 bin/
 obj/
+bin-*/
+.local/
 [Dd]ebug/
 [Rr]elease/
 *.user

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using CourseGuard.Backend.Models;
+using CourseGuard.Backend.Services;
 
 namespace CourseGuard.Backend.Data
 {
@@ -9,11 +10,17 @@ namespace CourseGuard.Backend.Data
     {
         public NotificationRepository()
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return;
+#endif
             EnsureNotificationSchema();
         }
 
         public List<NotificationModel> LoadAll()
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<NotificationModel>>("api/admin/notifications").GetAwaiter().GetResult();
+#endif
             const string sql = @"
                 SELECT id, user_id, title, content, is_read, created_at,
                        COALESCE(category, 'SystemAdmin') AS category,
@@ -28,6 +35,9 @@ namespace CourseGuard.Backend.Data
 
         public List<NotificationModel> LoadByUserId(int userId, string? category = null, string? notificationType = null)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<NotificationModel>>($"api/me/notifications?category={Uri.EscapeDataString(category ?? "")}&type={Uri.EscapeDataString(notificationType ?? "")}").GetAwaiter().GetResult();
+#endif
             string sql = @"
                 SELECT n.id, n.user_id, n.title, n.content, n.is_read, n.created_at,
                        COALESCE(n.category, 'SystemAdmin') AS category,
@@ -109,6 +119,9 @@ namespace CourseGuard.Backend.Data
 
         public bool MarkAsRead(int notificationId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>($"api/me/notifications/{notificationId}/read", new { }).GetAwaiter().GetResult();
+#endif
             const string sql = @"
                 UPDATE notifications
                 SET is_read = true
@@ -124,6 +137,9 @@ namespace CourseGuard.Backend.Data
 
         public bool Delete(int notificationId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>($"api/me/notifications/{notificationId}/delete", new { }).GetAwaiter().GetResult();
+#endif
             const string sql = @"
                 DELETE FROM notifications
                 WHERE id = @id;";

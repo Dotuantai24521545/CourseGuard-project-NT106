@@ -78,7 +78,7 @@
         }
 
         async #connect() {
-            const url = this.#buildConnectionUrl();
+            const url = await this.#buildConnectionUrl();
             await new Promise((resolve, reject) => {
                 const socket = new WebSocket(url);
                 this.socket = socket;
@@ -118,7 +118,24 @@
             });
         }
 
-        #buildConnectionUrl() {
+        async #buildConnectionUrl() {
+            if (this.config.apiMode) {
+                const ticket = await new Promise((resolve, reject) => {
+                    const requestId = crypto.randomUUID();
+                    let timer;
+                    const handler = event => {
+                        const row = event.data;
+                        if (row?.type !== "classroom-ticket" || row.requestId !== requestId) return;
+                        clearTimeout(timer);
+                        window.chrome.webview.removeEventListener("message", handler);
+                        row.error ? reject(new Error(row.error)) : resolve(row.ticket);
+                    };
+                    window.chrome.webview.addEventListener("message", handler);
+                    timer = setTimeout(() => { window.chrome.webview.removeEventListener("message", handler); reject(new Error("Không nhận được quyền kết nối lớp học.")); }, 10000);
+                    window.chrome.webview.postMessage({ type: "request-classroom-ticket", requestId });
+                });
+                return `${this.config.relayWsUrl}?ticket=${encodeURIComponent(ticket)}`;
+            }
             const rawUrl = String(this.config.relayWsUrl || "").trim();
             if (!rawUrl) {
                 throw new Error("Thiếu RELAY_WS_URL cho Railway Classroom Relay.");
