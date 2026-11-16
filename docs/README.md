@@ -1,5 +1,7 @@
 # Chạy CourseGuard client–server
 
+Hướng dẫn từng bước cho thành viên lấy code, chạy local, build lại và gửi PR nằm ngay trong [README gốc](../README.md). Mỗi bạn chạy cả server và client trên máy mình; database dev có thể dùng chung. Server chung qua Internet là phương án triển khai sau, không phải điều kiện để phát triển code.
+
 ## Thành phần
 
 - `CourseGuard/CourseGuard`: WinForms, bộ gọi HTTP API, cache đáp án và xử lý camera/WebRTC ở máy người dùng.
@@ -15,6 +17,8 @@ Server dùng `.env` cạnh project `CourseGuard.Server`. Biến bắt buộc: `C
 Client dùng `COURSEGUARD_API_URL`, ví dụ local `http://127.0.0.1:5080`. Kết nối ngoài localhost phải dùng HTTPS. Không dùng lại file client cũ chứa kết nối database.
 
 Chạy `scripts/Start-CourseGuard.ps1` tại gốc repo. `-BuildOnly` tạo lại gói; `-ServerOnly` chạy server; `-ClientOnly -ApiUrl ...` kết nối server đã triển khai. Script chỉ build nếu chưa có gói hoặc dùng BuildOnly; khi thay code cần build lại. File chạy và log ở `.local`, thư mục này được Git bỏ qua.
+
+Khi build lại: đóng app, chạy `scripts/Stop-CourseGuardServer.ps1`, sau đó Start với `-BuildOnly`, rồi Start bình thường. Script Stop kiểm tra cả PID và đường dẫn executable để không dừng nhầm server của repo khác.
 
 Email nhận OTP nằm trong database; thay email admin trên database chung không yêu cầu cả nhóm thay cấu hình client. Không commit mật khẩu/token.
 
