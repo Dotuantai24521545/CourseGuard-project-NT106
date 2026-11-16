@@ -112,6 +112,85 @@ try
         bool secondPassSynced = LocalAnswerCache.SyncPendingAnswersAsync(125, _ => Task.FromResult(true)).GetAwaiter().GetResult();
         Check(secondPassSynced && LocalAnswerCache.LoadAll(125).Count == 0, "Second sync pass should clear remaining answers");
     });
+    Run("resuming exam session restores latest offline cached answers", () =>
+    {
+        LocalAnswerCache.Clear(127);
+        LocalAnswerCache.SaveAnswer(1, 127, 1, "A");
+        LocalAnswerCache.SaveAnswer(1, 127, 1, "D");
+        LocalAnswerCache.SaveAnswer(1, 127, 2, "C");
+
+        var sessionQuestions = new List<TeacherExamQuestionModel>
+        {
+            new() { Id = 1, CorrectOption = "B" },
+            new() { Id = 2, CorrectOption = "A" },
+            new() { Id = 3, CorrectOption = "B" }
+        };
+
+        int restored = LocalAnswerCache.ApplyCachedAnswersToSession(
+            127,
+            sessionQuestions,
+            q => q.Id,
+            (q, option) => q.CorrectOption = option);
+
+        Check(restored == 2, $"Expected 2 restored answers, got {restored}");
+        Check(sessionQuestions[0].CorrectOption == "D", "Question 1 did not restore latest cached option");
+        Check(sessionQuestions[1].CorrectOption == "C", "Question 2 did not restore cached option");
+        Check(sessionQuestions[2].CorrectOption == "B", "Uncached question 3 should keep DB value");
+    });
+    Run("student exam form suppresses false screen switch violations and flushes cache on resume and submit", () =>
+    {
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string doExamPath = Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Student", "DoExamForm.cs");
+        string doExamDesignerPath = Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Student", "DoExamForm.Designer.cs");
+        string doExam = File.ReadAllText(doExamPath);
+        string doExamDesigner = File.ReadAllText(doExamDesignerPath);
+
+        int applyIndex = doExam.IndexOf("LocalAnswerCache.ApplyCachedAnswersToSession(_session)", StringComparison.Ordinal);
+        int showQuestionIndex = doExam.IndexOf("ShowQuestion(0)", StringComparison.Ordinal);
+        Check(applyIndex > 0 && showQuestionIndex > applyIndex, "LoadExamSession must restore cached answers before ShowQuestion(0)");
+
+        int submitStart = doExam.IndexOf("private void SubmitExam(", StringComparison.Ordinal);
+        int flushCall = doExam.IndexOf("TryFlushOfflineAnswersForSubmit()", submitStart, StringComparison.Ordinal);
+        int cacheLoad = doExam.IndexOf("LocalAnswerCache.LoadAll(_session.AttemptId)", submitStart, StringComparison.Ordinal);
+        Check(flushCall > submitStart && cacheLoad > flushCall, "SubmitExam must flush pending offline cache before checking unsynced answers");
+
+        Check(doExam.Contains("ShouldIgnoreDeactivateViolation()", StringComparison.Ordinal), "DoExamForm_Deactivate must use ShouldIgnoreDeactivateViolation");
+        Check(doExam.Contains("_allowCloseWithoutSubmit", StringComparison.Ordinal) && doExam.Contains("_pnlLock != null && _pnlLock.Visible", StringComparison.Ordinal),
+            "ShouldIgnoreDeactivateViolation must suppress deactivation during intentional close or OTP lock screen");
+
+        int showErrorStart = doExam.IndexOf("private void ShowErrorAndClose(", StringComparison.Ordinal);
+        int allowCloseAssign = doExam.IndexOf("_allowCloseWithoutSubmit = true;", showErrorStart, StringComparison.Ordinal);
+        int showErrorDialog = doExam.IndexOf("ShowExamDialog(", showErrorStart, StringComparison.Ordinal);
+        Check(allowCloseAssign > showErrorStart && showErrorDialog > allowCloseAssign, "ShowErrorAndClose must set _allowCloseWithoutSubmit before showing dialog");
+
+        Check(!doExam.Contains("MetaTheme.ShowModernDialog", StringComparison.Ordinal) || doExam.IndexOf("MetaTheme.ShowModernDialog", StringComparison.Ordinal) == doExam.IndexOf("ShowExamDialog", StringComparison.Ordinal) || doExam.Split("MetaTheme.ShowModernDialog").Length == 2,
+            "All internal dialogs in DoExamForm must route through ShowExamDialog");
+        Check(doExam.Contains("ShowExamDialog(", StringComparison.Ordinal), "DoExamForm must use ShowExamDialog helper");
+        Check(doExam.Contains("CleanupExamResources()", StringComparison.Ordinal) && doExamDesigner.Contains("CleanupExamResources()", StringComparison.Ordinal),
+            "DoExamForm must clean up keyboard hook, timers, and streams in both FormClosing and Dispose");
+    });
+    Run("monitoring and AI question dialogs guard resource cleanup, relay streaming, storage fallback, and draft imports", () =>
+    {
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string monitorAll = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "MonitorAllForm.cs"));
+        string monitorPopup = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "MonitorPopupForm.cs"));
+        string aiDialog = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "AiQuestionGeneratorDialog.cs"));
+
+        Check(monitorAll.Contains("RELAY_WS_URL", StringComparison.Ordinal) && monitorAll.Contains("ClientWebSocket", StringComparison.Ordinal),
+            "MonitorAllForm must support WebSocket relay monitoring alongside TCP");
+        Check(monitorAll.Contains("TcpScreenMonitorService.Instance", StringComparison.Ordinal),
+            "MonitorAllForm must keep TcpScreenMonitorService compatibility");
+        Check(monitorAll.Contains("frame.Dispose()", StringComparison.Ordinal),
+            "MonitorAllForm must dispose unowned bitmaps when form is disposed");
+
+        int uploadCatch = monitorPopup.IndexOf("UploadViolationImageAsync", StringComparison.Ordinal);
+        int insertCall = monitorPopup.IndexOf("InsertViolationAsync", uploadCatch, StringComparison.Ordinal);
+        Check(uploadCatch > 0 && insertCall > uploadCatch && monitorPopup.Contains("string? imageUrl = null;", StringComparison.Ordinal),
+            "MonitorPopupForm must still persist violation record if image upload fails");
+
+        Check(aiDialog.Contains("row.Cells[\"Content\"].Value", StringComparison.Ordinal) && aiDialog.Contains("if (added <= 0)", StringComparison.Ordinal),
+            "AiQuestionGeneratorDialog must read edited grid content and guard added <= 0");
+    });
 }
 finally { if (Directory.Exists(cacheDirectory)) Directory.Delete(cacheDirectory, recursive: true); }
-Console.WriteLine($"{passed}/7 tests passed.");
+Console.WriteLine($"{passed}/10 tests passed.");
