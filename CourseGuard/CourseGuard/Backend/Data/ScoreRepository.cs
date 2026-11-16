@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using CourseGuard.Backend.Config;
 using Npgsql;
 using CourseGuard.Backend.Models;
+using CourseGuard.Backend.Services;
 
 namespace CourseGuard.Backend.Data
 {
@@ -28,10 +29,17 @@ namespace CourseGuard.Backend.Data
         // --- Chuỗi kết nối Supabase ---
         // Sử dụng cùng một chuỗi kết nối với phần còn lại của dự án.
         // Port 6543 là Transaction Pooler của Supabase (phù hợp cho ứng dụng desktop).
-        private readonly string _connectionString = AppEnvironment.GetRequired(
+        private readonly string _connectionString = ConnectionString();
+        private static string ConnectionString()
+        {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return "";
+#endif
+            return AppEnvironment.GetRequired(
             "COURSEGUARD_DB_CONNECTION",
             "SUPABASE_DB_CONNECTION",
             "CONNECTION_STRING");
+        }
 
         // =====================================================================
         // SCRIPT SQL GỢI Ý (Chạy trên Supabase SQL Editor nếu chưa có):
@@ -60,6 +68,9 @@ namespace CourseGuard.Backend.Data
         /// <returns>Danh sách <see cref="StudentScoreModel"/>. Trả về rỗng nếu chưa có dữ liệu.</returns>
         public List<StudentScoreModel> LoadAll()
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.GetAsync<List<StudentScoreModel>>("api/admin/scores").GetAwaiter().GetResult();
+#endif
             var list = new List<StudentScoreModel>();
 
             using var conn = new NpgsqlConnection(_connectionString);
@@ -126,6 +137,9 @@ namespace CourseGuard.Backend.Data
         /// <exception cref="Exception">Ném exception nếu kết nối hoặc câu lệnh SQL lỗi.</exception>
         public int UpsertMany(List<StudentScoreModel> scores)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return ServerApiClient.PostAsync<int>("api/admin/scores",scores).GetAwaiter().GetResult();
+#endif
             if (scores == null || scores.Count == 0) return 0;
 
             int totalAffected = 0;

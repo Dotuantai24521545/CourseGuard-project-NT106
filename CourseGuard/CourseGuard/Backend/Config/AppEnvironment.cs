@@ -67,6 +67,12 @@ namespace CourseGuard.Backend.Config
         public static string GetRequired(params string[] keys)
         {
             LoadDotEnvIfExists();
+#if !COURSEGUARD_SERVER
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("COURSEGUARD_API_URL"))
+                && Array.Exists(keys, key => key is "COURSEGUARD_DB_CONNECTION" or "SUPABASE_DB_CONNECTION" or "CONNECTION_STRING"
+                    or "SMTP_PASS" or "OPENROUTER_API_KEY"))
+                throw new InvalidOperationException("Thông tin bí mật chỉ được sử dụng trên server trong chế độ API.");
+#endif
 
             foreach (string key in keys)
             {

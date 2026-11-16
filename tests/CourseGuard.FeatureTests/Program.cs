@@ -7985,9 +7985,12 @@ static class TestRunner
     public static void Run(string name, Func<Task> test)
     {
         if (ShouldSkip(name)) return;
+        var previousContext = SynchronizationContext.Current;
         try
         {
-            test().GetAwaiter().GetResult();
+            // Earlier WinForms control tests may install a UI context without a message pump.
+            SynchronizationContext.SetSynchronizationContext(null);
+            test().WaitAsync(TimeSpan.FromSeconds(60)).GetAwaiter().GetResult();
             _passed++;
             Console.WriteLine($"PASS {name}");
         }
@@ -7997,6 +8000,7 @@ static class TestRunner
             Console.Error.WriteLine($"FAIL {name}: {ex.Message}");
             Environment.ExitCode = 1;
         }
+        finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
     }
 }
 

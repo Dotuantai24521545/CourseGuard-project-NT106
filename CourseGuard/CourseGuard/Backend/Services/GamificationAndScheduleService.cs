@@ -31,6 +31,9 @@ namespace CourseGuard.Backend.Services
         // 🥇 4. Bảng Xếp Hạng & Hệ Thống Huy Hiệu (Leaderboards & Badges)
         public async Task<List<LeaderboardItem>> GetCourseLeaderboardAsync(int courseId)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)return await ServerApiClient.GetAsync<List<LeaderboardItem>>($"api/courses/{courseId}/leaderboard");
+#endif
             var list = new List<LeaderboardItem>();
             try
             {

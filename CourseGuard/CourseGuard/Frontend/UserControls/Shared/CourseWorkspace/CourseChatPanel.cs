@@ -37,6 +37,9 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
         private readonly ContextMenuStrip _attachStrip = new();
         private TableLayoutPanel? _chatGrid;
         private readonly object _messageLoadSync = new();
+        private readonly System.Windows.Forms.Timer _chatRefreshTimer = new() { Interval = 2000 };
+        private readonly CancellationTokenSource _chatRefreshLifetime = new();
+        private bool _refreshTickRunning;
         private CancellationTokenSource? _messageLoadCts;
         private int _selectedCourseId;
         private int _messageLoadGeneration;
@@ -77,16 +80,38 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
             BuildLayout();
             ApplyStyles();
             WireEvents();
+            _chatRefreshTimer.Tick += async (_, _) =>
+            {
+                if (_refreshTickRunning || !_uiAlive || !Visible || !IsHandleCreated || _selectedCourseId <= 0)
+                    return;
+                _refreshTickRunning = true;
+                try
+                {
+                    await RefreshMessagesAsync(_chatRefreshLifetime.Token);
+                }
+                catch (Exception ex)
+                {
+                    // Retry without repeatedly interrupting the user when connectivity is lost.
+                    Debug.WriteLine($"Chat refresh failed: {ex.GetType().Name}");
+                }
+                finally { _refreshTickRunning = false; }
+            };
 
             SupabaseRealtimeChatService.Instance.OnChatChanged += OnChatRealtimeChanged;
             if (StartRealtimeForTesting)
             {
-                SupabaseRealtimeChatService.Instance.Start();
+                if (!CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                    SupabaseRealtimeChatService.Instance.Start();
+                _chatRefreshTimer.Start();
             }
 
             Disposed += (_, _) =>
             {
                 _uiAlive = false;
+                _chatRefreshTimer.Stop();
+                _chatRefreshTimer.Dispose();
+                _chatRefreshLifetime.Cancel();
+                _chatRefreshLifetime.Dispose();
                 CancelActiveMessageLoad();
                 _attachStrip.Dispose();
                 SupabaseRealtimeChatService.Instance.OnChatChanged -= OnChatRealtimeChanged;

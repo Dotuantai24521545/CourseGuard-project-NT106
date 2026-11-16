@@ -15,6 +15,10 @@ namespace CourseGuard.Backend.Services.Storage
 
         public SupabaseStorageService(string? supabaseUrl = null, string? anonKey = null)
         {
+            if (ServerApiClient.Enabled)
+            {
+                _supabaseUrl="";_storageUrl="";_anonKey="";_httpClient=new HttpClient();return;
+            }
             _supabaseUrl = string.IsNullOrWhiteSpace(supabaseUrl)
                 ? AppEnvironment.GetRequired("SUPABASE_URL")
                 : supabaseUrl;
@@ -50,6 +54,7 @@ namespace CourseGuard.Backend.Services.Storage
         /// </summary>
         public async Task<string> UploadFileAsync(byte[] fileBytes, string fileName, string bucketName = "nt106", string contentType = "image/jpeg")
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<string>("api/storage/evidence", new { bytes=fileBytes,fileName,contentType });
             string endpoint = $"{_storageUrl.TrimEnd('/')}/storage/v1/object/{bucketName}/{fileName}";
 
             using var content = new ByteArrayContent(fileBytes);
