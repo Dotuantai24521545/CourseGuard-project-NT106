@@ -4,6 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace CourseGuard.Backend.Security
 {
@@ -24,16 +25,21 @@ namespace CourseGuard.Backend.Security
             return Path.Combine(folder, $"offline_answers_{attemptId}.dat");
         }
 
-        public static void SaveAnswer(int studentId, int attemptId, int questionId, string selectedOption)
+        public static bool SaveAnswer(int studentId, int attemptId, int questionId, string selectedOption)
         {
             lock (CacheLock)
             {
                 var answers = LoadAll(attemptId);
                 var existing = answers.Find(a => a.QuestionId == questionId);
+                DateTime now = DateTime.Now;
                 if (existing != null)
                 {
+                    if (now <= existing.AnsweredAt)
+                    {
+                        now = existing.AnsweredAt.AddTicks(1);
+                    }
                     existing.SelectedOption = selectedOption;
-                    existing.AnsweredAt = DateTime.Now;
+                    existing.AnsweredAt = now;
                 }
                 else
                 {
@@ -43,10 +49,10 @@ namespace CourseGuard.Backend.Security
                         AttemptId = attemptId,
                         QuestionId = questionId,
                         SelectedOption = selectedOption,
-                        AnsweredAt = DateTime.Now
+                        AnsweredAt = now
                     });
                 }
-                SaveAll(attemptId, answers);
+                return SaveAll(attemptId, answers);
             }
         }
 
@@ -86,7 +92,7 @@ namespace CourseGuard.Backend.Security
             }
         }
 
-        public static void SaveAll(int attemptId, List<CachedAnswer> answers)
+        public static bool SaveAll(int attemptId, List<CachedAnswer> answers)
         {
             lock (CacheLock)
             {
@@ -106,8 +112,12 @@ namespace CourseGuard.Backend.Security
                         stream.Flush(flushToDisk: true);
                     }
                     File.Move(temporaryPath, path, overwrite: true);
+                    return true;
                 }
-                catch { }
+                catch
+                {
+                    return false;
+                }
                 finally
                 {
                     if (temporaryPath != null)
@@ -116,6 +126,83 @@ namespace CourseGuard.Backend.Security
                     }
                 }
             }
+        }
+
+        public static bool RemoveSyncedAnswer(CachedAnswer syncedAnswer)
+        {
+            if (syncedAnswer == null)
+            {
+                return false;
+            }
+
+            return RemoveSyncedAnswer(
+                syncedAnswer.AttemptId,
+                syncedAnswer.QuestionId,
+                syncedAnswer.SelectedOption,
+                syncedAnswer.AnsweredAt);
+        }
+
+        public static bool RemoveSyncedAnswer(int attemptId, int questionId, string selectedOption, DateTime? answeredAt = null)
+        {
+            lock (CacheLock)
+            {
+                var answers = LoadAll(attemptId);
+                int index = answers.FindIndex(a =>
+                    a.QuestionId == questionId &&
+                    string.Equals(a.SelectedOption, selectedOption, StringComparison.Ordinal) &&
+                    (!answeredAt.HasValue || a.AnsweredAt == answeredAt.Value));
+
+                if (index < 0)
+                {
+                    return false;
+                }
+
+                answers.RemoveAt(index);
+                if (answers.Count == 0)
+                {
+                    Clear(attemptId);
+                    return true;
+                }
+
+                return SaveAll(attemptId, answers);
+            }
+        }
+
+        public static async Task<bool> SyncPendingAnswersAsync(
+            int attemptId,
+            Func<CachedAnswer, Task<bool>> persistAnswerAsync)
+        {
+            ArgumentNullException.ThrowIfNull(persistAnswerAsync);
+
+            var snapshot = LoadAll(attemptId);
+            if (snapshot.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (var cached in snapshot)
+            {
+                bool synced;
+                try
+                {
+                    synced = await persistAnswerAsync(cached).ConfigureAwait(false);
+                }
+                catch
+                {
+                    synced = false;
+                }
+
+                if (synced)
+                {
+                    RemoveSyncedAnswer(cached);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return LoadAll(attemptId).Count == 0;
         }
 
         private static byte[] Encrypt(byte[] data, int attemptId)

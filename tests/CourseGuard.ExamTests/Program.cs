@@ -75,6 +75,43 @@ try
         Check(LocalAnswerCache.LoadAll(123).Count == 0, "Clear failed");
         Check(LocalAnswerCache.LoadAll(124).Single().SelectedOption == "D", "Other attempt was changed");
     });
+    Run("changing answer while offline sync is in flight preserves newer cached answer", () =>
+    {
+        LocalAnswerCache.Clear(125);
+        LocalAnswerCache.SaveAnswer(1, 125, 1, "A");
+        LocalAnswerCache.SaveAnswer(1, 125, 2, "B");
+
+        bool allSynced = LocalAnswerCache.SyncPendingAnswersAsync(125, cached =>
+        {
+            if (cached.QuestionId == 1 && cached.SelectedOption == "A")
+            {
+                // Student changes question 1 and answers question 3 while question 1 sync is in flight.
+                LocalAnswerCache.SaveAnswer(1, 125, 1, "C");
+                LocalAnswerCache.SaveAnswer(1, 125, 3, "D");
+            }
+            return Task.FromResult(true);
+        }).GetAwaiter().GetResult();
+
+        var remaining = LocalAnswerCache.LoadAll(125);
+        Check(!allSynced, "Sync should report pending answers when new selections arrive mid-sync");
+        Check(remaining.All(a => a.QuestionId != 2), "Unchanged synced answer should be removed");
+        Check(remaining.Single(a => a.QuestionId == 1).SelectedOption == "C", "Updated answer for synced question was lost");
+        Check(remaining.Single(a => a.QuestionId == 3).SelectedOption == "D", "Newly added answer during sync was lost");
+
+        // Also verify re-selecting the same option letter during sync is preserved via AnsweredAt version check.
+        LocalAnswerCache.Clear(126);
+        LocalAnswerCache.SaveAnswer(1, 126, 1, "A");
+        bool sameLetterSynced = LocalAnswerCache.SyncPendingAnswersAsync(126, cached =>
+        {
+            LocalAnswerCache.SaveAnswer(1, 126, 1, "B");
+            LocalAnswerCache.SaveAnswer(1, 126, 1, "A");
+            return Task.FromResult(true);
+        }).GetAwaiter().GetResult();
+        Check(!sameLetterSynced && LocalAnswerCache.LoadAll(126).Single().SelectedOption == "A", "Newer timestamp with same option letter was lost");
+
+        bool secondPassSynced = LocalAnswerCache.SyncPendingAnswersAsync(125, _ => Task.FromResult(true)).GetAwaiter().GetResult();
+        Check(secondPassSynced && LocalAnswerCache.LoadAll(125).Count == 0, "Second sync pass should clear remaining answers");
+    });
 }
 finally { if (Directory.Exists(cacheDirectory)) Directory.Delete(cacheDirectory, recursive: true); }
-Console.WriteLine($"{passed}/6 tests passed.");
+Console.WriteLine($"{passed}/7 tests passed.");

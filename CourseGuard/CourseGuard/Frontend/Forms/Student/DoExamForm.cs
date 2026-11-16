@@ -539,14 +539,23 @@ namespace CourseGuard.Frontend.Forms.Student
                 return;
 
             StudentExamTakingQuestionModel question = _session.Questions[_currentIndex];
+            int studentId = UserSessionContext.CurrentUserId ?? 0;
             bool saved = false;
             try
             {
-                saved = _dbContext.SaveStudentExamAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
+                saved = _dbContext.SaveStudentExamAnswer(studentId, _session.AttemptId, question.Id, option);
             }
             catch (Exception)
             {
-                LocalAnswerCache.SaveAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
+                if (LocalAnswerCache.SaveAnswer(studentId, _session.AttemptId, question.Id, option))
+                {
+                    question.SelectedOption = option;
+                    UpdateQuestionButtons();
+                    UpdateProgressSummary();
+                    UpdateSaveStatus(false, offline: true);
+                    return;
+                }
+
                 UpdateSaveStatus(false);
                 return;
             }
@@ -560,10 +569,15 @@ namespace CourseGuard.Frontend.Forms.Student
                 return;
             }
 
-            LocalAnswerCache.SaveAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
-            question.SelectedOption = option;
-            UpdateQuestionButtons();
-            UpdateProgressSummary();
+            if (LocalAnswerCache.SaveAnswer(studentId, _session.AttemptId, question.Id, option))
+            {
+                question.SelectedOption = option;
+                UpdateQuestionButtons();
+                UpdateProgressSummary();
+                UpdateSaveStatus(false, offline: true);
+                return;
+            }
+
             UpdateSaveStatus(false);
         }
 
@@ -783,41 +797,20 @@ namespace CourseGuard.Frontend.Forms.Student
             if (_session == null || _isSyncingCache)
                 return;
 
-            var cachedAnswers = LocalAnswerCache.LoadAll(_session.AttemptId);
-            if (cachedAnswers.Count == 0)
+            int attemptId = _session.AttemptId;
+            if (LocalAnswerCache.LoadAll(attemptId).Count == 0)
                 return;
 
             _isSyncingCache = true;
             try
             {
-                foreach (var cached in cachedAnswers.ToList())
+                bool allSynced = await LocalAnswerCache.SyncPendingAnswersAsync(
+                    attemptId,
+                    cached => System.Threading.Tasks.Task.Run(() =>
+                        _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption)));
+
+                if (allSynced)
                 {
-                    bool synced = await System.Threading.Tasks.Task.Run(() =>
-                    {
-                        try
-                        {
-                            return _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption);
-                        }
-                        catch
-                        {
-                            return false;
-                        }
-                    });
-
-                    if (synced)
-                    {
-                        cachedAnswers.Remove(cached);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if (cachedAnswers.Count == 0)
-                {
-                    LocalAnswerCache.Clear(_session.AttemptId);
-
                     void ResetSaveStatusSuccess()
                     {
                         if (_saveStatusLabel != null && !_saveStatusLabel.IsDisposed)
@@ -831,10 +824,6 @@ namespace CourseGuard.Frontend.Forms.Student
                         BeginInvoke(new MethodInvoker(ResetSaveStatusSuccess));
                     else
                         ResetSaveStatusSuccess();
-                }
-                else
-                {
-                    LocalAnswerCache.SaveAll(_session.AttemptId, cachedAnswers);
                 }
             }
             finally
