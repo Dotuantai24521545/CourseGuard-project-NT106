@@ -576,7 +576,12 @@ namespace CourseGuard.Frontend.Forms.Student
             bool saved = false;
             try
             {
-                saved = _dbContext.SaveStudentExamAnswer(studentId, _session.AttemptId, question.Id, option);
+                saved = LocalAnswerCache.SaveOnlineAnswer(
+                    studentId,
+                    _session.AttemptId,
+                    question.Id,
+                    option,
+                    () => _dbContext.SaveStudentExamAnswer(studentId, _session.AttemptId, question.Id, option));
             }
             catch (Exception)
             {
@@ -595,6 +600,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
             if (saved)
             {
+                LocalAnswerCache.RecordOnlineAnswerSaved(studentId, _session.AttemptId, question.Id, option);
                 question.SelectedOption = option;
                 UpdateQuestionButtons();
                 UpdateProgressSummary();
@@ -904,6 +910,8 @@ namespace CourseGuard.Frontend.Forms.Student
                         }
                     }
 
+                    if (IsDisposed)
+                        return;
                     if (InvokeRequired)
                         BeginInvoke(new MethodInvoker(ResetSaveStatusSuccess));
                     else
