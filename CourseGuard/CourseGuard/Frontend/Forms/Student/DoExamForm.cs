@@ -692,6 +692,7 @@ namespace CourseGuard.Frontend.Forms.Student
                 }
 
                 _submitted = true;
+                LocalAnswerCache.Clear(_session.AttemptId);
                 int? userId = UserSessionContext.CurrentUserId > 0 ? UserSessionContext.CurrentUserId : null;
                 string username = UserSessionContext.CurrentUsername ?? "không xác định";
                 System.Threading.Tasks.Task.Run(() =>
@@ -720,31 +721,12 @@ namespace CourseGuard.Frontend.Forms.Student
             if (_session == null)
                 return;
 
-            var cachedAnswers = LocalAnswerCache.LoadAll(_session.AttemptId);
-            if (cachedAnswers.Count == 0)
-                return;
-
-            foreach (var cached in cachedAnswers)
-            {
-                bool synced = false;
-                try
-                {
-                    synced = _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption);
-                }
-                catch
-                {
-                    synced = false;
-                }
-
-                if (synced)
-                {
-                    LocalAnswerCache.RemoveSyncedAnswer(cached);
-                }
-                else
-                {
-                    break;
-                }
-            }
+            LocalAnswerCache.SyncPendingAnswersAsync(
+                _session.AttemptId,
+                cached => System.Threading.Tasks.Task.FromResult(
+                    _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption)))
+                .GetAwaiter()
+                .GetResult();
         }
 
         private void UpdateTimerText()
@@ -870,7 +852,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
         private void AntiCheatTimer_Tick(object? sender, EventArgs e)
         {
-            if (_submitted || _autoSubmitTriggered)
+            if (_submitted || _autoSubmitTriggered || _allowCloseWithoutSubmit)
                 return;
 
             // Retry offline answers every five timer ticks.
@@ -1085,6 +1067,9 @@ namespace CourseGuard.Frontend.Forms.Student
                 int studentId = UserSessionContext.CurrentUserId ?? 0;
 
                 var studentUser = await System.Threading.Tasks.Task.Run(() => _dbContext.GetUserById(studentId));
+                if (IsDisposed || _submitted)
+                    return;
+
                 if (studentUser == null || string.IsNullOrWhiteSpace(studentUser.Email))
                 {
                     ShowExamDialog("Không tìm thấy thông tin email đăng ký của tài khoản. Vui lòng gọi trực tiếp giáo viên coi thi.", "Lỗi gửi thư", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1100,6 +1085,8 @@ namespace CourseGuard.Frontend.Forms.Student
 
                 var emailService = new SmtpEmailService();
                 var result = await emailService.SendEmailAsync(studentUser.Email, "[CourseGuard] Mã OTP khôi phục bài thi", emailBody);
+                if (IsDisposed || _submitted)
+                    return;
 
                 if (result.Success)
                 {
@@ -1112,12 +1099,18 @@ namespace CourseGuard.Frontend.Forms.Student
             }
             catch (Exception ex)
             {
-                ShowExamDialog($"Không thể kết nối để gửi email: {ex.Message}. Vui lòng liên hệ giáo viên trực tiếp.", "Lỗi kết nối", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!IsDisposed && !_submitted)
+                {
+                    ShowExamDialog($"Không thể kết nối để gửi email: {ex.Message}. Vui lòng liên hệ giáo viên trực tiếp.", "Lỗi kết nối", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
             finally
             {
-                _btnRequestOtpEmail.Enabled = true;
-                _btnRequestOtpEmail.Text = "Gửi OTP qua Email";
+                if (!IsDisposed && !_btnRequestOtpEmail.IsDisposed)
+                {
+                    _btnRequestOtpEmail.Enabled = true;
+                    _btnRequestOtpEmail.Text = "Gửi OTP qua Email";
+                }
             }
         }
     }

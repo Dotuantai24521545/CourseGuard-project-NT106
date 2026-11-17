@@ -8,18 +8,27 @@ dotnet run --project tests/CourseGuard.ExamTests/CourseGuard.ExamTests.csproj
 
 This executable links the production scoring and answer-cache source files and verifies key source contracts in the exam and monitoring UI. It needs no database, `.env`, SMTP, or external packages. Any failure returns a nonzero exit code. Temporary cache data lives under the test output directory and is removed after execution; real student caches are untouched.
 
-## Coverage (10/10 tests)
+## Coverage (19/19 tests)
 
 1. Blank and null answers cannot earn points, even with a blank answer key.
 2. Case and whitespace normalization, wrong answers, missing answers, and unknown question IDs.
 3. Student and teacher scores agree at decimal rounding boundaries (rounded to 2 decimal places, away from zero, after summing decimal points).
 4. Concurrent saves preserve all questions and updating a question does not duplicate it.
 5. A Windows file lock that prevents replacement leaves the previous snapshot readable and removes temporary files.
-6. Clearing an attempt does not affect another attempt.
-7. Changing or re-selecting an answer while offline sync (`SyncPendingAnswersAsync`) is in flight preserves the newer cached selection via atomic per-answer `RemoveSyncedAnswer` checks (`QuestionId`, `SelectedOption`, monotonic `AnsweredAt`).
-8. Resuming an exam session restores the latest offline cached answers into session questions (`ApplyCachedAnswersToSession`).
-9. `DoExamForm` routes internal dialogs through `ShowExamDialog` / `ShouldIgnoreDeactivateViolation` (preventing false `SCREEN_SWITCH` violations), flushes offline cache on submit (`TryFlushOfflineAnswersForSubmit`), and cleans up hooks/timers/streams in `FormClosing` and `Dispose`.
-10. `MonitorAllForm`, `MonitorPopupForm`, and `AiQuestionGeneratorDialog` guard bitmap disposal, WebSocket relay monitoring (`RELAY_WS_URL`), DB violation fallback when image upload fails, and edited/draft AI question imports.
+6. Transient exclusive file locks (e.g. antivirus/indexer) retry cleanly without losing or dropping cached answers.
+7. Clearing an attempt does not affect another attempt.
+8. Changing or re-selecting an answer while offline sync (`SyncPendingAnswersAsync`) is in flight preserves the newer cached selection via atomic per-answer `RemoveSyncedAnswer` checks (`QuestionId`, `SelectedOption`, `Version`, monotonic `AnsweredAt`).
+9. Resuming an exam session restores the latest offline cached answers into session questions (`ApplyCachedAnswersToSession`) without regressing newer online-saved selections.
+10. `DoExamForm` routes internal dialogs through `ShowExamDialog` / `ShouldIgnoreDeactivateViolation` (preventing false `SCREEN_SWITCH` violations), flushes offline cache on submit (`TryFlushOfflineAnswersForSubmit`), and cleans up hooks/timers/streams in `FormClosing` and `Dispose`.
+11. `MonitorAllForm`, `MonitorPopupForm`, and `AiQuestionGeneratorDialog` guard bitmap disposal, WebSocket relay monitoring (`RELAY_WS_URL` + authenticated `ServerApiClient` compatibility), DB violation fallback when image upload fails, and edited/draft AI question imports (`_grid.EndEdit()`).
+12. Stale cached answer is not replayed after a newer online save (`ExamAnswerWriter`).
+13. Stale cache from a previous session is dropped when a newer answer is saved online.
+14. Changing to option B while sync of cached A is in flight leaves B on the server.
+15. Rapid selections superseded while waiting on the write gate are skipped so the latest selection wins.
+16. Offline save of an older version never overwrites a newer cached version (`RemoveAnswersUpToVersion`).
+17. `FlushAsync` waits for in-flight saves before reporting pending state.
+18. `LocalAnswerCache.SaveOnlineAnswer` + `SyncPendingAnswersAsync` coordination prevents cached A from overwriting online B both when B is saved before sync and when B is saved while sync of A is in flight.
+19. `ScreenStreamPacketAssembler` / `ScreenStreamProtocol.ReceiveBinaryMessageAsync` reassembles split 30-byte headers, split JPEG payloads, and multiple consecutive messages until `EndOfMessage`, enforces the `MaxFrameBytes + HeaderLength` (`5MB + 30` bytes) limit, and handles `Close` and `CancellationToken` cancellation cleanly.
 
 ## `LocalAnswerCache` Architecture & Known Limitations
 

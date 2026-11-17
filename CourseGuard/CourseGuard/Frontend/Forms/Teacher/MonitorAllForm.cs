@@ -21,6 +21,8 @@ namespace CourseGuard.Frontend.Forms.Teacher
         private readonly ConcurrentDictionary<int, ClientWebSocket> _relaySockets = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly List<int> _relayExamIds;
+        private readonly object _fragmentLock = new();
+        private readonly MemoryStream _fragmentBuffer = new();
         private bool _cleanedUp;
 
         public MonitorAllForm() : this(0, null)
@@ -54,8 +56,16 @@ namespace CourseGuard.Frontend.Forms.Teacher
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            TcpScreenMonitorService.Instance.StartListening();
-            foreach (int examId in _relayExamIds)
+            bool useAuthenticatedApi = IsAuthenticatedServerApiEnabled();
+            if (!useAuthenticatedApi)
+            {
+                TcpScreenMonitorService.Instance.StartListening();
+            }
+
+            IReadOnlyList<int> examIds = _relayExamIds.Count > 0
+                ? _relayExamIds
+                : (useAuthenticatedApi ? new[] { 0 } : Array.Empty<int>());
+            foreach (int examId in examIds)
             {
                 StartWebSocketRelayReceiverAsync(examId, _cts.Token).FireAndForgetSafe(this);
             }
@@ -84,6 +94,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
             {
                 try
                 {
+                    pair.Value.Abort();
                     pair.Value.Dispose();
                 }
                 catch
@@ -91,6 +102,11 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 }
             }
             _relaySockets.Clear();
+
+            lock (_fragmentLock)
+            {
+                _fragmentBuffer.SetLength(0);
+            }
 
             TcpScreenMonitorService.Instance.FrameReceived -= Service_FrameReceived;
             foreach (var card in _studentCards.Values)
@@ -105,9 +121,40 @@ namespace CourseGuard.Frontend.Forms.Teacher
             if (disposing)
             {
                 CleanupMonitorResources();
+                _fragmentBuffer.Dispose();
                 _cts.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private static bool IsAuthenticatedServerApiEnabled()
+        {
+            Type? serverApiType = typeof(MonitorAllForm).Assembly.GetType("CourseGuard.Backend.Services.ServerApiClient");
+            return serverApiType?.GetProperty("Enabled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null) is true;
+        }
+
+        private static async Task ConnectMonitorWebSocketAsync(
+            ClientWebSocket ws,
+            int examId,
+            string relayUrl,
+            CancellationToken cancellationToken)
+        {
+            Type? serverApiType = typeof(MonitorAllForm).Assembly.GetType("CourseGuard.Backend.Services.ServerApiClient");
+            if (serverApiType?.GetProperty("Enabled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null) is true)
+            {
+                var connectMethod = serverApiType.GetMethod(
+                    "ConnectMonitorAsync",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    new[] { typeof(ClientWebSocket), typeof(int), typeof(int), typeof(CancellationToken) });
+                if (connectMethod?.Invoke(null, new object[] { ws, examId, 0, cancellationToken }) is Task connectTask)
+                {
+                    await connectTask;
+                    return;
+                }
+            }
+
+            string connectionUrl = $"{relayUrl}?role=teacher&examId={examId}";
+            await ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
         }
 
         private async Task StartWebSocketRelayReceiverAsync(int examId, CancellationToken cancellationToken)
@@ -121,21 +168,12 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 _relaySockets[examId] = ws;
                 try
                 {
-                    string connectionUrl = $"{relayUrl}?role=teacher&examId={examId}";
-                    await ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
-
-                    var buffer = new byte[1024 * 1024 * 5];
-                    while (ws.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
-                    {
-                        var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cancellationToken);
-                        if (result.MessageType == WebSocketMessageType.Close)
-                            break;
-
-                        if (result.MessageType == WebSocketMessageType.Binary && result.Count > 0)
-                        {
-                            ProcessReceivedPacket(buffer, result.Count);
-                        }
-                    }
+                    await ConnectMonitorWebSocketAsync(ws, examId, relayUrl, cancellationToken);
+                    await ReceiveWebSocketMessagesAsync(ws, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch
                 {
@@ -158,23 +196,136 @@ namespace CourseGuard.Frontend.Forms.Teacher
             }
         }
 
+        internal async Task ReceiveWebSocketMessagesAsync(WebSocket ws, CancellationToken cancellationToken)
+        {
+            var receiveBuffer = new byte[64 * 1024];
+            int maxPacketBytes = ScreenStreamProtocol.MaxFrameBytes + ScreenStreamProtocol.HeaderLength;
+            while (ws.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+            {
+                byte[]? message = await ScreenStreamProtocol.ReceiveBinaryMessageAsync(
+                    ws,
+                    receiveBuffer,
+                    cancellationToken,
+                    maxPacketBytes);
+                if (message == null)
+                {
+                    break;
+                }
+
+                if (message.Length > 0)
+                {
+                    lock (_fragmentLock)
+                    {
+                        _fragmentBuffer.SetLength(0);
+                    }
+
+                    ProcessReceivedPacket(message, message.Length);
+
+                    lock (_fragmentLock)
+                    {
+                        // A complete WebSocket message ended at EndOfMessage; never carry over a truncated tail.
+                        _fragmentBuffer.SetLength(0);
+                    }
+                }
+            }
+        }
+
         private void ProcessReceivedPacket(byte[] packet, int count)
         {
-            if (count < ScreenStreamProtocol.HeaderLength)
+            if (packet == null || count <= 0 || count > packet.Length)
                 return;
 
-            var header = new byte[ScreenStreamProtocol.HeaderLength];
-            Buffer.BlockCopy(packet, 0, header, 0, ScreenStreamProtocol.HeaderLength);
+            int maxPacketBytes = ScreenStreamProtocol.MaxFrameBytes + ScreenStreamProtocol.HeaderLength;
+            List<ScreenFrameReceivedEventArgs>? readyFrames = null;
 
-            if (!ScreenStreamProtocol.TryReadHeader(header, out byte frameType, out int frameExamId, out int frameStudentId, out int frameAttemptId, out _, out int jpegLength))
-                return;
+            lock (_fragmentLock)
+            {
+                if (_fragmentBuffer.Length + count > maxPacketBytes)
+                {
+                    _fragmentBuffer.SetLength(0);
+                    return;
+                }
 
-            if (count - ScreenStreamProtocol.HeaderLength < jpegLength)
-                return;
+                _fragmentBuffer.Write(packet, 0, count);
+                byte[] buffered = _fragmentBuffer.ToArray();
+                int bufferedLength = buffered.Length;
+                int offset = 0;
 
-            var jpegBytes = new byte[jpegLength];
-            Buffer.BlockCopy(packet, ScreenStreamProtocol.HeaderLength, jpegBytes, 0, jpegLength);
-            Service_FrameReceived(this, new ScreenFrameReceivedEventArgs(frameType, frameExamId, frameStudentId, frameAttemptId, jpegBytes));
+                while (bufferedLength - offset > 0)
+                {
+                    int magicCheckLength = Math.Min(bufferedLength - offset, ScreenStreamProtocol.Magic.Length);
+                    bool validMagicPrefix = true;
+                    for (int i = 0; i < magicCheckLength; i++)
+                    {
+                        if (buffered[offset + i] != ScreenStreamProtocol.Magic[i])
+                        {
+                            validMagicPrefix = false;
+                            break;
+                        }
+                    }
+
+                    if (!validMagicPrefix || (bufferedLength - offset >= 5 && buffered[offset + 4] != ScreenStreamProtocol.Version))
+                    {
+                        _fragmentBuffer.SetLength(0);
+                        return;
+                    }
+
+                    if (bufferedLength - offset < ScreenStreamProtocol.HeaderLength)
+                    {
+                        break;
+                    }
+
+                    var header = new byte[ScreenStreamProtocol.HeaderLength];
+                    Buffer.BlockCopy(buffered, offset, header, 0, ScreenStreamProtocol.HeaderLength);
+                    if (!ScreenStreamProtocol.TryReadHeader(
+                        header,
+                        out byte frameType,
+                        out int frameExamId,
+                        out int frameStudentId,
+                        out int frameAttemptId,
+                        out _,
+                        out int jpegLength))
+                    {
+                        _fragmentBuffer.SetLength(0);
+                        return;
+                    }
+
+                    int totalPacketLength = ScreenStreamProtocol.HeaderLength + jpegLength;
+                    if (totalPacketLength > maxPacketBytes)
+                    {
+                        _fragmentBuffer.SetLength(0);
+                        return;
+                    }
+
+                    if (bufferedLength - offset < totalPacketLength)
+                    {
+                        break;
+                    }
+
+                    var jpegBytes = new byte[jpegLength];
+                    Buffer.BlockCopy(buffered, offset + ScreenStreamProtocol.HeaderLength, jpegBytes, 0, jpegLength);
+                    readyFrames ??= new List<ScreenFrameReceivedEventArgs>();
+                    readyFrames.Add(new ScreenFrameReceivedEventArgs(frameType, frameExamId, frameStudentId, frameAttemptId, jpegBytes));
+                    offset += totalPacketLength;
+                }
+
+                if (offset > 0)
+                {
+                    _fragmentBuffer.SetLength(0);
+                    if (bufferedLength > offset)
+                    {
+                        _fragmentBuffer.Write(buffered, offset, bufferedLength - offset);
+                    }
+                }
+            }
+
+            if (readyFrames != null)
+            {
+                foreach (var frameEvent in readyFrames)
+                {
+                    Service_FrameReceived(this, frameEvent);
+                }
+            }
         }
 
         private void Service_FrameReceived(object? sender, ScreenFrameReceivedEventArgs e)

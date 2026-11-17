@@ -1,6 +1,8 @@
+using System.Net.WebSockets;
 using CourseGuard.Backend.Models;
 using CourseGuard.Backend.Security;
 using CourseGuard.Backend.Services;
+using CourseGuard.Backend.Services.Monitoring;
 
 int passed = 0;
 void Run(string name, Action test)
@@ -154,6 +156,18 @@ try
         Check(sessionQuestions[0].CorrectOption == "D", "Question 1 did not restore latest cached option");
         Check(sessionQuestions[1].CorrectOption == "C", "Question 2 did not restore cached option");
         Check(sessionQuestions[2].CorrectOption == "B", "Uncached question 3 should keep DB value");
+
+        // If a newer answer was already saved online for question 1, ApplyCachedAnswersToSession must not overwrite it with an older cache entry.
+        LocalAnswerCache.Clear(128);
+        LocalAnswerCache.SaveAnswer(1, 128, 1, "A", version: 10);
+        LocalAnswerCache.RecordOnlineAnswerSaved(1, 128, 1, "B", version: 20);
+        sessionQuestions[0].CorrectOption = "B";
+        LocalAnswerCache.ApplyCachedAnswersToSession(
+            128,
+            sessionQuestions,
+            q => q.Id,
+            (q, option) => q.CorrectOption = option);
+        Check(sessionQuestions[0].CorrectOption == "B", "ApplyCachedAnswersToSession must not overwrite a newer online-saved selection");
     });
     Run("student exam form suppresses false screen switch violations and flushes cache on resume and submit", () =>
     {
@@ -208,6 +222,8 @@ try
 
         Check(aiDialog.Contains("row.Cells[\"Content\"].Value", StringComparison.Ordinal) && aiDialog.Contains("if (added <= 0)", StringComparison.Ordinal),
             "AiQuestionGeneratorDialog must read edited grid content and guard added <= 0");
+        Check(aiDialog.Contains("_grid.EndEdit()", StringComparison.Ordinal) && aiDialog.Contains("easy + medium + hard <= 0", StringComparison.Ordinal),
+            "AiQuestionGeneratorDialog must commit in-progress grid edits before import and guard zero question count");
     });
     Run("stale cached answer is not replayed after a newer online save", () =>
     {
@@ -372,9 +388,118 @@ try
               doExam.Contains("LocalAnswerCache.RecordOnlineAnswerSaved(", StringComparison.Ordinal),
             "DoExamForm.SaveSelectedAnswer must coordinate online saves with LocalAnswerCache");
     });
+    Run("websocket relay assembler handles split header, split jpeg, consecutive messages, size limit with 30-byte header, close, and cancel", () =>
+    {
+        Check(ScreenStreamPacketAssembler.HeaderLength == 30, "HeaderLength must be 30 bytes");
+        Check(ScreenStreamPacketAssembler.MaxPacketBytes == ScreenStreamPacketAssembler.MaxFrameBytes + 30,
+            "MaxPacketBytes must include the 30-byte header");
+
+        byte[] sampleJpeg1 = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0xFF, 0xD9 };
+        byte[] sampleJpeg2 = new byte[] { 0xFF, 0xD8, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xFF, 0xD9 };
+        byte[] packet1 = ScreenStreamPacketAssembler.BuildPacket(0, examId: 7, studentId: 101, attemptId: 501, unixMillis: 1700000001000L, sampleJpeg1);
+        byte[] packet2 = ScreenStreamPacketAssembler.BuildPacket(1, examId: 7, studentId: 102, attemptId: 502, unixMillis: 1700000002000L, sampleJpeg2);
+
+        // 1. Header split across two fragments (first 20 bytes, then remaining bytes) -> must parse 1 frame after EndOfMessage.
+        var splitHeaderSocket = new FakeFragmentedWebSocket();
+        splitHeaderSocket.EnqueueFragment(packet1[..20], endOfMessage: false);
+        splitHeaderSocket.EnqueueFragment(packet1[20..], endOfMessage: true);
+        splitHeaderSocket.EnqueueClose();
+
+        var receivedSplitHeader = new List<ScreenStreamFrameData>();
+        var buffer = new byte[64];
+        while (true)
+        {
+            byte[]? raw = ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(splitHeaderSocket, buffer, CancellationToken.None).GetAwaiter().GetResult();
+            if (raw == null) break;
+            ScreenStreamPacketAssembler.TryParsePackets(raw, raw.Length, receivedSplitHeader.Add);
+        }
+        Check(receivedSplitHeader.Count == 1, $"Expected 1 frame from split header, got {receivedSplitHeader.Count}");
+        Check(receivedSplitHeader[0].StudentId == 101 && receivedSplitHeader[0].AttemptId == 501 && receivedSplitHeader[0].JpegBytes.SequenceEqual(sampleJpeg1),
+            "Split header frame payload mismatch");
+
+        // 2. JPEG payload split across three fragments + multiple consecutive messages on the same socket.
+        var multiSocket = new FakeFragmentedWebSocket();
+        // Message 1: header split (10 bytes + 20 bytes) + JPEG (all)
+        multiSocket.EnqueueFragment(packet1[..10], endOfMessage: false);
+        multiSocket.EnqueueFragment(packet1[10..30], endOfMessage: false);
+        multiSocket.EnqueueFragment(packet1[30..], endOfMessage: true);
+        // Message 2: full header + first 4 JPEG bytes, then remaining JPEG bytes
+        multiSocket.EnqueueFragment(packet2[..34], endOfMessage: false);
+        multiSocket.EnqueueFragment(packet2[34..], endOfMessage: true);
+        // Message 3: unsplit packet1 again
+        multiSocket.EnqueueFragment(packet1, endOfMessage: true);
+        multiSocket.EnqueueClose();
+
+        var receivedMulti = new List<ScreenStreamFrameData>();
+        while (true)
+        {
+            byte[]? raw = ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(multiSocket, buffer, CancellationToken.None).GetAwaiter().GetResult();
+            if (raw == null) break;
+            ScreenStreamPacketAssembler.TryParsePackets(raw, raw.Length, receivedMulti.Add);
+        }
+        Check(receivedMulti.Count == 3, $"Expected 3 consecutive frames, got {receivedMulti.Count}");
+        Check(receivedMulti[0].StudentId == 101 && receivedMulti[1].StudentId == 102 && receivedMulti[1].FrameType == 1 && receivedMulti[2].StudentId == 101,
+            "Consecutive fragmented messages parsed out of order");
+        Check(receivedMulti[1].JpegBytes.SequenceEqual(sampleJpeg2), "Split JPEG payload corrupted");
+
+        // 3. Size limit must include the 30-byte header: with maxPacketBytes = 30 + sampleJpeg1.Length, exact size succeeds, +1 byte throws InvalidDataException.
+        int exactLimit = ScreenStreamPacketAssembler.HeaderLength + sampleJpeg1.Length;
+        var exactSocket = new FakeFragmentedWebSocket();
+        exactSocket.EnqueueFragment(packet1[..15], endOfMessage: false);
+        exactSocket.EnqueueFragment(packet1[15..], endOfMessage: true);
+        byte[]? exactBytes = ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(exactSocket, buffer, CancellationToken.None, exactLimit).GetAwaiter().GetResult();
+        Check(exactBytes != null && exactBytes.Length == exactLimit, "Packet at exact (30 + payload) limit should succeed");
+
+        var oversizeSocket = new FakeFragmentedWebSocket();
+        oversizeSocket.EnqueueFragment(packet1[..20], endOfMessage: false);
+        oversizeSocket.EnqueueFragment(packet1[20..], endOfMessage: true);
+        bool threwOversize = false;
+        try
+        {
+            ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(oversizeSocket, buffer, CancellationToken.None, exactLimit - 1).GetAwaiter().GetResult();
+        }
+        catch (InvalidDataException)
+        {
+            threwOversize = true;
+        }
+        Check(threwOversize, "Packet exceeding (header 30 + payload) limit must throw InvalidDataException");
+
+        // 4. Close mid-message and CancellationToken cancellation must not emit partial frames.
+        var closeMidSocket = new FakeFragmentedWebSocket();
+        closeMidSocket.EnqueueFragment(packet1[..20], endOfMessage: false);
+        closeMidSocket.EnqueueClose();
+        byte[]? closedResult = ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(closeMidSocket, buffer, CancellationToken.None).GetAwaiter().GetResult();
+        Check(closedResult == null, "Close mid-message must return null without emitting partial bytes");
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var cancelSocket = new FakeFragmentedWebSocket();
+        cancelSocket.EnqueueFragment(packet1, endOfMessage: true);
+        bool threwCancel = false;
+        try
+        {
+            ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(cancelSocket, buffer, cts.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            threwCancel = true;
+        }
+        Check(threwCancel, "Canceled token must throw OperationCanceledException");
+
+        // 5. Verify MonitorAllForm and MonitorPopupForm source wiring for EndOfMessage reassembly and authenticated ServerApiClient compatibility.
+        string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        string monitorAll = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "MonitorAllForm.cs"));
+        string monitorPopup = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "MonitorPopupForm.cs"));
+        Check(monitorAll.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal) &&
+              monitorAll.Contains("ConnectMonitorAsync", StringComparison.Ordinal),
+            "MonitorAllForm must reassemble messages until EndOfMessage and preserve authenticated ServerApiClient WebSocket support");
+        Check(monitorPopup.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal) &&
+              monitorPopup.Contains("ConnectMonitorAsync", StringComparison.Ordinal),
+            "MonitorPopupForm must reassemble messages until EndOfMessage and preserve authenticated ServerApiClient WebSocket support");
+    });
 }
 finally { if (Directory.Exists(cacheDirectory)) Directory.Delete(cacheDirectory, recursive: true); }
-Console.WriteLine($"{passed}/18 tests passed.");
+Console.WriteLine($"{passed}/19 tests passed.");
 
 static bool SpinUntil(Func<bool> condition) => SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(5));
 
@@ -395,4 +520,60 @@ sealed class FakeAnswerServer
         Writes.Enqueue($"{questionId}{option}");
         return true;
     }
+}
+
+sealed class FakeFragmentedWebSocket : WebSocket
+{
+    private readonly Queue<(byte[] Bytes, WebSocketMessageType MessageType, bool EndOfMessage)> _frames = new();
+    private WebSocketState _state = WebSocketState.Open;
+
+    public void EnqueueFragment(byte[] bytes, bool endOfMessage, WebSocketMessageType messageType = WebSocketMessageType.Binary)
+    {
+        _frames.Enqueue((bytes.ToArray(), messageType, endOfMessage));
+    }
+
+    public void EnqueueClose()
+    {
+        _frames.Enqueue((Array.Empty<byte>(), WebSocketMessageType.Close, true));
+    }
+
+    public override WebSocketCloseStatus? CloseStatus => _state == WebSocketState.CloseReceived ? WebSocketCloseStatus.NormalClosure : null;
+    public override string? CloseStatusDescription => null;
+    public override WebSocketState State => _state;
+    public override string? SubProtocol => null;
+    public override void Abort() => _state = WebSocketState.Aborted;
+    public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+    {
+        _state = WebSocketState.Closed;
+        return Task.CompletedTask;
+    }
+    public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+    {
+        _state = WebSocketState.Closed;
+        return Task.CompletedTask;
+    }
+    public override void Dispose() => _state = WebSocketState.Closed;
+
+    public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_frames.Count == 0)
+        {
+            _state = WebSocketState.CloseReceived;
+            return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, WebSocketCloseStatus.NormalClosure, string.Empty));
+        }
+
+        var (bytes, messageType, endOfMessage) = _frames.Dequeue();
+        if (messageType == WebSocketMessageType.Close)
+        {
+            _state = WebSocketState.CloseReceived;
+            return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, WebSocketCloseStatus.NormalClosure, string.Empty));
+        }
+
+        Buffer.BlockCopy(bytes, 0, buffer.Array!, buffer.Offset, bytes.Length);
+        return Task.FromResult(new WebSocketReceiveResult(bytes.Length, messageType, endOfMessage));
+    }
+
+    public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+        => Task.CompletedTask;
 }
