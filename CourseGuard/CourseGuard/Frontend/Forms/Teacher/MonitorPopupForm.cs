@@ -32,6 +32,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
         private readonly ViolationRepository _violationRepo = new();
         private readonly SupabaseStorageService _storageService = new();
         private ClientWebSocket? _ws;
+        private bool _cleanedUp;
 
         public MonitorPopupForm(int teacherId, int examId, int studentId, int attemptId)
         {
@@ -50,28 +51,44 @@ namespace CourseGuard.Frontend.Forms.Teacher
             SupabaseRealtimeChatService.Instance.OnViolationChanged += OnViolationRealtimeChanged;
             SupabaseRealtimeChatService.Instance.Start();
 
-            FormClosing += (_, _) =>
+            FormClosing += (_, _) => CleanupMonitorResources();
+        }
+
+        private void CleanupMonitorResources()
+        {
+            if (_cleanedUp)
+                return;
+
+            _cleanedUp = true;
+            if (_ws != null && _ws.State == WebSocketState.Open)
             {
-                if (_ws != null && _ws.State == WebSocketState.Open)
+                try
                 {
-                    try
-                    {
-                        string revertRateCommand = $"{_studentId}:3000";
-                        byte[] cmdBytes = System.Text.Encoding.UTF8.GetBytes(revertRateCommand);
-                        _ws.SendAsync(new ArraySegment<byte>(cmdBytes), WebSocketMessageType.Text, true, CancellationToken.None).GetAwaiter().GetResult();
-                    }
-                    catch
-                    {
-                        // Bỏ qua
-                    }
+                    using var revertCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+                    string revertRateCommand = $"{_studentId}:3000";
+                    byte[] cmdBytes = System.Text.Encoding.UTF8.GetBytes(revertRateCommand);
+                    _ws.SendAsync(new ArraySegment<byte>(cmdBytes), WebSocketMessageType.Text, true, revertCts.Token).GetAwaiter().GetResult();
                 }
+                catch
+                {
+                    // Bỏ qua
+                }
+            }
 
+            try
+            {
                 _cts.Cancel();
-                _ws?.Dispose();
-                _picture.Image?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
 
-                SupabaseRealtimeChatService.Instance.OnViolationChanged -= OnViolationRealtimeChanged;
-            };
+            _ws?.Dispose();
+            _ws = null;
+            _picture.Image?.Dispose();
+            _picture.Image = null;
+
+            SupabaseRealtimeChatService.Instance.OnViolationChanged -= OnViolationRealtimeChanged;
         }
 
         private void OnViolationRealtimeChanged(object? sender, ViolationChangedEventArgs e)
@@ -102,6 +119,30 @@ namespace CourseGuard.Frontend.Forms.Teacher
             LoadViolationsAsync().FireAndForgetSafe(this);
         }
 
+        private static async Task ConnectMonitorWebSocketAsync(
+            ClientWebSocket ws,
+            int examId,
+            string relayUrl,
+            CancellationToken cancellationToken)
+        {
+            Type? serverApiType = typeof(MonitorPopupForm).Assembly.GetType("CourseGuard.Backend.Services.ServerApiClient");
+            if (serverApiType?.GetProperty("Enabled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null) is true)
+            {
+                var connectMethod = serverApiType.GetMethod(
+                    "ConnectMonitorAsync",
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+                    new[] { typeof(ClientWebSocket), typeof(int), typeof(int), typeof(CancellationToken) });
+                if (connectMethod?.Invoke(null, new object[] { ws, examId, 0, cancellationToken }) is Task connectTask)
+                {
+                    await connectTask;
+                    return;
+                }
+            }
+
+            string connectionUrl = $"{relayUrl}?role=teacher&examId={examId}";
+            await ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
+        }
+
         private async Task StartWebSocketReceiver()
         {
             CourseGuard.Backend.Config.AppEnvironment.LoadDotEnvIfExists();
@@ -114,9 +155,8 @@ namespace CourseGuard.Frontend.Forms.Teacher
                     _ws?.Dispose();
                     _ws = new ClientWebSocket();
 
-                    string connectionUrl = $"{relayUrl}?role=teacher&examId={_examId}";
                     SetStatus("Đang kết nối tới Cloud Relay...");
-                    await _ws.ConnectAsync(new Uri(connectionUrl), _cts.Token);
+                    await ConnectMonitorWebSocketAsync(_ws, _examId, relayUrl, _cts.Token);
                     SetStatus("Đã kết nối tới Cloud Relay. Đang chờ camera học sinh...");
 
                     try
@@ -130,24 +170,40 @@ namespace CourseGuard.Frontend.Forms.Teacher
                         // Bỏ qua lỗi gửi tín hiệu ban đầu
                     }
 
-                    var buffer = new byte[1024 * 1024 * 5]; // 5MB buffer
+                    var buffer = new byte[64 * 1024];
+                    int maxPacketBytes = ScreenStreamProtocol.MaxFrameBytes + ScreenStreamProtocol.HeaderLength;
                     while (_ws.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
                     {
-                        var result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
-                        if (result.MessageType == WebSocketMessageType.Close)
+                        byte[]? message = await ScreenStreamProtocol.ReceiveBinaryMessageAsync(
+                            _ws,
+                            buffer,
+                            _cts.Token,
+                            maxPacketBytes);
+                        if (message == null)
                             break;
 
-                        if (result.MessageType == WebSocketMessageType.Binary && result.Count > 0)
+                        if (message.Length > 0)
                         {
-                            ProcessReceivedPacket(buffer, result.Count);
+                            ProcessReceivedPacket(message, message.Length);
                         }
                     }
+                }
+                catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
                     if (_cts.Token.IsCancellationRequested) break;
                     SetStatus($"Lỗi kết nối: {ex.Message}. Đang kết nối lại...");
-                    await Task.Delay(2000, _cts.Token);
+                    try
+                    {
+                        await Task.Delay(2000, _cts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -271,9 +327,18 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 bmp.Save(ms, ImageFormat.Jpeg);
                 byte[] imageBytes = ms.ToArray();
 
-                // 1. Upload ảnh
-                string fileName = $"violation_exam{_examId}_student{_studentId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.jpg";
-                string imageUrl = await _storageService.UploadViolationImageAsync(imageBytes, fileName);
+                // 1. Upload ảnh (fallback lưu vi phạm ngay cả khi upload ảnh lỗi)
+                string? imageUrl = null;
+                string? uploadWarning = null;
+                try
+                {
+                    string fileName = $"violation_exam{_examId}_student{_studentId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.jpg";
+                    imageUrl = await _storageService.UploadViolationImageAsync(imageBytes, fileName);
+                }
+                catch (Exception uploadEx)
+                {
+                    uploadWarning = uploadEx.Message;
+                }
 
                 // 2. Lưu database
                 var violation = new ViolationModel
@@ -288,27 +353,52 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 await _violationRepo.InsertViolationAsync(violation);
 
                 // 3. Reload list
+                if (IsDisposed)
+                    return;
+
                 await LoadViolationsAsync();
-                MetaTheme.ShowModernDialog("Đã ghi nhận vi phạm thành công!", "Thành công");
+                if (IsDisposed)
+                    return;
+
+                if (uploadWarning != null)
+                {
+                    MetaTheme.ShowModernDialog(
+                        $"Đã ghi nhận vi phạm vào hệ thống, nhưng chưa tải được ảnh bằng chứng lên Storage ({uploadWarning}).",
+                        "Cảnh báo lưu ảnh",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    MetaTheme.ShowModernDialog("Đã ghi nhận vi phạm thành công!", "Thành công");
+                }
             }
             catch (Exception ex)
             {
-                MetaTheme.ShowModernDialog($"Lỗi khi ghi nhận vi phạm: {ex.Message}", "Lỗi");
+                if (!IsDisposed)
+                {
+                    MetaTheme.ShowModernDialog($"Lỗi khi ghi nhận vi phạm: {ex.Message}", "Lỗi");
+                }
             }
             finally
             {
-                _btnRecordViolation.Enabled = true;
-                _btnRecordViolation.Text = "Ghi nhận vi phạm";
+                if (!IsDisposed && !_btnRecordViolation.IsDisposed)
+                {
+                    _btnRecordViolation.Enabled = true;
+                    _btnRecordViolation.Text = "Ghi nhận vi phạm";
+                }
             }
         }
 
         private async Task LoadViolationsAsync()
         {
-            if (_attemptId <= 0) return;
+            if (_attemptId <= 0 || IsDisposed) return;
 
             try
             {
                 var violations = await _violationRepo.GetViolationsByAttemptIdAsync(_attemptId);
+                if (IsDisposed) return;
+
                 if (InvokeRequired)
                 {
                     BeginInvoke(new MethodInvoker(() => BindViolations(violations)));
@@ -327,6 +417,9 @@ namespace CourseGuard.Frontend.Forms.Teacher
 
         private void BindViolations(System.Collections.Generic.List<ViolationModel> violations)
         {
+            if (IsDisposed || _dgvViolations.IsDisposed)
+                return;
+
             _dgvViolations.Rows.Clear();
             foreach (var v in violations)
             {
@@ -368,24 +461,43 @@ namespace CourseGuard.Frontend.Forms.Teacher
         {
             if (e.StudentId != _studentId) return;
 
+            Bitmap? frame = null;
             try
             {
                 using var ms = new MemoryStream(e.JpegBytes);
                 using var source = Image.FromStream(ms);
-                var frame = new Bitmap(source);
-                if (IsDisposed) return;
-                
+                frame = new Bitmap(source);
+                if (IsDisposed)
+                {
+                    frame.Dispose();
+                    return;
+                }
+
                 if (InvokeRequired)
                 {
-                    BeginInvoke(new MethodInvoker(() => { if (!IsDisposed) SetFrame(frame, e.FrameType); }));
+                    Bitmap capturedFrame = frame;
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        if (IsDisposed)
+                        {
+                            capturedFrame.Dispose();
+                            return;
+                        }
+
+                        SetFrame(capturedFrame, e.FrameType);
+                    }));
+                    frame = null;
                 }
                 else
                 {
-                    SetFrame(frame, e.FrameType);
+                    Bitmap readyFrame = frame;
+                    frame = null;
+                    SetFrame(readyFrame, e.FrameType);
                 }
             }
             catch
             {
+                frame?.Dispose();
                 // Bỏ qua lỗi parse hình ảnh bị hỏng nếu có
             }
         }
@@ -414,8 +526,23 @@ namespace CourseGuard.Frontend.Forms.Teacher
 
         private void SetStatus(string status)
         {
+            if (IsDisposed || _status.IsDisposed)
+                return;
+
             if (InvokeRequired)
-                BeginInvoke(new MethodInvoker(() => _status.Text = status));
+            {
+                try
+                {
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        if (!IsDisposed && !_status.IsDisposed)
+                            _status.Text = status;
+                    }));
+                }
+                catch
+                {
+                }
+            }
             else
             {
                 _status.Text = status;

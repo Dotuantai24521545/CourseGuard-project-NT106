@@ -67,11 +67,17 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             return Task.CompletedTask;
         }
 
-        protected override Task EditAsync()
+        protected override async Task EditAsync()
         {
-            var form = new MonitorAllForm();
+            int selectedExamId = CurrentInt("ExamId");
+            List<int> activeExamIds = await Task.Run(() => ApplyCourseFilter(Controller.GetActiveExamSessions(TeacherId))
+                .Select(s => s.ExamId)
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList());
+
+            var form = new MonitorAllForm(selectedExamId, activeExamIds);
             form.Show(FindForm());
-            return Task.CompletedTask;
         }
     }
 }

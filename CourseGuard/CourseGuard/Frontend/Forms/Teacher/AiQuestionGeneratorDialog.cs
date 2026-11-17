@@ -173,6 +173,15 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 return;
             }
 
+            int easy = (int)_numEasy.Value;
+            int medium = (int)_numMedium.Value;
+            int hard = (int)_numHard.Value;
+            if (easy + medium + hard <= 0)
+            {
+                MessageBox.Show("Vui lòng chọn số lượng câu hỏi lớn hơn 0 trước khi sinh câu hỏi.", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             _btnGenerate.Enabled = false;
             _lblStatus.Text = "⏳ Đang kết nối OpenRouter Qwen AI để sinh câu hỏi... Vui lòng đợi trong giây lát.";
             _generatedQuestions.Clear();
@@ -180,11 +189,10 @@ namespace CourseGuard.Frontend.Forms.Teacher
 
             try
             {
-                int easy = (int)_numEasy.Value;
-                int medium = (int)_numMedium.Value;
-                int hard = (int)_numHard.Value;
-
                 var result = await _aiService.GenerateQuestionsAsync(topic, easy, medium, hard);
+                if (IsDisposed)
+                    return;
+
                 if (result.Count == 0)
                 {
                     _lblStatus.Text = "❌ AI không trả về câu hỏi hợp lệ. Vui lòng thử lại hoặc rút gọn nội dung.";
@@ -204,17 +212,27 @@ namespace CourseGuard.Frontend.Forms.Teacher
             }
             catch (Exception ex)
             {
-                _lblStatus.Text = "❌ Lỗi thực thi sinh câu hỏi AI.";
-                MessageBox.Show($"Lỗi AI: {ex.Message}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!IsDisposed)
+                {
+                    _lblStatus.Text = "❌ Lỗi thực thi sinh câu hỏi AI.";
+                    MessageBox.Show($"Lỗi AI: {ex.Message}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
             finally
             {
-                _btnGenerate.Enabled = true;
+                if (!IsDisposed && !_btnGenerate.IsDisposed)
+                {
+                    _btnGenerate.Enabled = true;
+                }
             }
         }
 
         private async Task SaveSelectedQuestionsAsync()
         {
+            if (IsDisposed)
+                return;
+
+            _grid.EndEdit();
             var selectedList = new List<TeacherExamQuestionModel>();
             for (int i = 0; i < _grid.Rows.Count; i++)
             {
@@ -223,10 +241,12 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 if (isChecked && i < _generatedQuestions.Count)
                 {
                     var q = _generatedQuestions[i];
+                    string editedContent = row.Cells["Content"].Value?.ToString()?.Trim() ?? string.Empty;
+                    string questionText = string.IsNullOrWhiteSpace(editedContent) ? q.Content : editedContent;
                     selectedList.Add(new TeacherExamQuestionModel
                     {
                         ExamId = _examId,
-                        QuestionText = q.Content,
+                        QuestionText = questionText,
                         OptionA = q.OptionA,
                         OptionB = q.OptionB,
                         OptionC = q.OptionC,
@@ -246,16 +266,37 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 return;
             }
 
+            _btnSaveSelected.Enabled = false;
             try
             {
                 int added = await _controller.ImportQuestionsToExamAsync(_teacherId, _examId, _courseId, selectedList);
+                if (IsDisposed)
+                    return;
+
+                if (added <= 0)
+                {
+                    QuestionsAdded = false;
+                    MessageBox.Show("Không thể lưu câu hỏi AI. Bài kiểm tra có thể không còn ở trạng thái nháp hoặc không thuộc khóa học đã chọn.", "Không thể lưu câu hỏi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
                 QuestionsAdded = true;
                 MessageBox.Show($"Đã lưu thành công {added} câu hỏi AI vào bài thi!", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 Close();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Lỗi lưu câu hỏi: {ex.Message}", "Lỗi CSDL", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!IsDisposed)
+                {
+                    MessageBox.Show($"Lỗi lưu câu hỏi: {ex.Message}", "Lỗi CSDL", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            finally
+            {
+                if (!IsDisposed && !_btnSaveSelected.IsDisposed)
+                {
+                    _btnSaveSelected.Enabled = true;
+                }
             }
         }
     }

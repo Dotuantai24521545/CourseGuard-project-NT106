@@ -213,7 +213,7 @@ namespace CourseGuard.Frontend.UserControls.Teacher
             
             if (view.PrimaryActionText == "Giám sát")
             {
-                var form = new MonitorAllForm();
+                var form = new MonitorAllForm(exam.Id);
                 form.Show(FindForm());
                 return;
             }

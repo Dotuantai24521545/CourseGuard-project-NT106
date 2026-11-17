@@ -1,6 +1,9 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
+using System.Net.WebSockets;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CourseGuard.Backend.Services.Monitoring
 {
@@ -11,6 +14,20 @@ namespace CourseGuard.Backend.Services.Monitoring
         public static readonly byte[] Magic = { (byte)'C', (byte)'G', (byte)'S', (byte)'F' };
         public const byte Version = 1;
         public const int HeaderLength = 30; // Updated from 29 to 30 to include FrameType
+        public const int MaxPacketBytes = HeaderLength + MaxFrameBytes;
+
+        public static Task<byte[]?> ReceiveBinaryMessageAsync(
+            WebSocket webSocket,
+            byte[] receiveBuffer,
+            CancellationToken cancellationToken,
+            int maxPacketBytes = MaxPacketBytes)
+        {
+            return ScreenStreamPacketAssembler.ReceiveBinaryMessageAsync(
+                webSocket,
+                receiveBuffer,
+                cancellationToken,
+                maxPacketBytes);
+        }
 
         public static byte[] BuildHeader(byte frameType, int examId, int studentId, int attemptId, long unixMillis, int jpegLength)
         {
