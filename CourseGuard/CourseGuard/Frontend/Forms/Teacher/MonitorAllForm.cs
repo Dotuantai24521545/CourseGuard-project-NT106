@@ -51,6 +51,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
             {
                 card.DisposeImage();
             }
+            TcpScreenMonitorService.Instance.Dispose();
         }
 
         private void Service_FrameReceived(object? sender, ScreenFrameReceivedEventArgs e)
@@ -102,7 +103,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 _studentId = studentId;
                 _examId = examId;
                 _attemptId = attemptId;
-                
+
                 Width = 240;
                 Height = 180;
                 Margin = new Padding(10);
@@ -116,7 +117,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                     BackColor = Color.Black,
                     Cursor = Cursors.Hand
                 };
-                _pictureBox.Click += (_, _) => 
+                _pictureBox.Click += (_, _) =>
                 {
                     var popup = new MonitorPopupForm(0, _examId, _studentId, _attemptId);
                     popup.Show(parentForm);
@@ -142,7 +143,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 Image? old = _pictureBox.Image;
                 _pictureBox.Image = frame;
                 old?.Dispose();
-                
+
                 _pictureBox.Refresh(); // Force redraw
 
                 if (frameType == 1) // Cheating detected

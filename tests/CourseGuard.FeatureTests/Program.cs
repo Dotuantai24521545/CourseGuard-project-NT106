@@ -5106,22 +5106,35 @@ Run("student exam answer save failures update inline status without persisting s
     string source = File.ReadAllText(Path.Combine(RepoRoot(), "CourseGuard", "CourseGuard", "Frontend", "Forms", "Student", "DoExamForm.cs"));
     string methodSource = ExtractMethodSource(source, "private void SaveSelectedAnswer");
     int saveCallIndex = methodSource.IndexOf("SaveStudentExamAnswer", StringComparison.Ordinal);
-    int assignmentIndex = methodSource.IndexOf("question.SelectedOption = option", StringComparison.Ordinal);
-    int successBlockIndex = methodSource.IndexOf("if (saved)", StringComparison.Ordinal);
+    int firstAssignmentIndex = methodSource.IndexOf("question.SelectedOption = option", StringComparison.Ordinal);
+    int lastAssignmentIndex = methodSource.LastIndexOf("question.SelectedOption = option", StringComparison.Ordinal);
     int catchIndex = methodSource.IndexOf("catch", StringComparison.Ordinal);
+    int catchCacheSaveIndex = methodSource.IndexOf("if (LocalAnswerCache.SaveAnswer(", catchIndex, StringComparison.Ordinal);
+    int successBlockIndex = methodSource.IndexOf("if (saved)", StringComparison.Ordinal);
+    int fallbackCacheSaveIndex = methodSource.IndexOf("if (LocalAnswerCache.SaveAnswer(", successBlockIndex, StringComparison.Ordinal);
     int returnedFalseStatusIndex = methodSource.LastIndexOf("UpdateSaveStatus(false)", StringComparison.Ordinal);
 
     AssertTrue(saveCallIndex >= 0, "SaveSelectedAnswer must persist through SaveStudentExamAnswer");
-    AssertTrue(successBlockIndex >= 0, "SaveSelectedAnswer must keep the session mutation in the saved-only branch");
-    AssertTrue(assignmentIndex > saveCallIndex, "SelectedOption must not be mutated before the DB save succeeds");
-    AssertTrue(assignmentIndex > successBlockIndex, "SelectedOption must be assigned only inside the saved-only branch");
     AssertTrue(catchIndex > saveCallIndex, "SaveSelectedAnswer must catch DB save exceptions near the save path");
+    AssertTrue(catchCacheSaveIndex > catchIndex, "catch path must attempt LocalAnswerCache.SaveAnswer before mutating SelectedOption");
+    AssertTrue(firstAssignmentIndex > catchCacheSaveIndex, "SelectedOption must not be mutated before DB or offline cache save succeeds");
+    AssertTrue(successBlockIndex > catchIndex, "SaveSelectedAnswer must keep the DB saved branch after try/catch");
+    AssertTrue(fallbackCacheSaveIndex > successBlockIndex, "returned-false DB save path must attempt LocalAnswerCache.SaveAnswer fallback");
     AssertTrue(
-        methodSource.Substring(catchIndex).Contains("UpdateSaveStatus(false)", StringComparison.Ordinal),
-        "exception path must update the inline save status as failed");
+        methodSource.Substring(catchIndex, successBlockIndex - catchIndex).Contains("question.SelectedOption = option", StringComparison.Ordinal),
+        "catch offline-cache success path must update SelectedOption so UI matches cached answer");
     AssertTrue(
-        returnedFalseStatusIndex > assignmentIndex,
-        "returned-false save failures must update the inline save status as failed");
+        methodSource.Substring(catchIndex, successBlockIndex - catchIndex).Contains("UpdateSaveStatus(false)", StringComparison.Ordinal),
+        "exception path must update the inline save status as failed when cache also fails");
+    AssertTrue(
+        returnedFalseStatusIndex > lastAssignmentIndex,
+        "unpersisted save failures must update the inline save status as failed without mutating SelectedOption");
+
+    string syncMethodSource = ExtractMethodSource(source, "private async System.Threading.Tasks.Task SyncOfflineAnswersAsync");
+    AssertTrue(
+        syncMethodSource.Contains("LocalAnswerCache.SyncPendingAnswersAsync", StringComparison.Ordinal) ||
+        syncMethodSource.Contains("LocalAnswerCache.RemoveSyncedAnswer", StringComparison.Ordinal),
+        "SyncOfflineAnswersAsync must remove synced answers atomically instead of overwriting the cache");
 });
 
 Run("fire and forget safe with null owner does not throw synchronously", () =>
