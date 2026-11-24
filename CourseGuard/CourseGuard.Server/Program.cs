@@ -102,7 +102,7 @@ app.MapPost("/api/auth/verify", async (VerifyRequest request, CourseGuardDbConte
         new Claim("password_version", verified.Value.PasswordVersion),
         new Claim("must_change_password", user.TempPasswordExpiresAt is not null ? "true" : "false") }, CookieAuthenticationDefaults.AuthenticationScheme);
     await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
-    return Results.Ok(new { user.Id, user.Username, user.FullName, user.Email, user.Role, user.TempPasswordExpiresAt });
+    return Results.Ok(new { user.Id, user.Username, user.FullName, user.Email, user.Role, user.Status, user.AvatarPath, user.TempPasswordExpiresAt });
 }).RequireRateLimiting("auth");
 app.MapPost("/api/auth/logout", async (HttpContext ctx) => { await ctx.SignOutAsync(); return Results.NoContent(); }).RequireAuthorization();
 var api = app.MapGroup("/api").RequireAuthorization();
