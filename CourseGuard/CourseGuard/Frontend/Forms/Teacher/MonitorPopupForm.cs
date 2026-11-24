@@ -119,34 +119,15 @@ namespace CourseGuard.Frontend.Forms.Teacher
             LoadViolationsAsync().FireAndForgetSafe(this);
         }
 
-        private static async Task ConnectMonitorWebSocketAsync(
-            ClientWebSocket ws,
-            int examId,
-            string relayUrl,
-            CancellationToken cancellationToken)
-        {
-            Type? serverApiType = typeof(MonitorPopupForm).Assembly.GetType("CourseGuard.Backend.Services.ServerApiClient");
-            if (serverApiType?.GetProperty("Enabled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null) is true)
-            {
-                var connectMethod = serverApiType.GetMethod(
-                    "ConnectMonitorAsync",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
-                    new[] { typeof(ClientWebSocket), typeof(int), typeof(int), typeof(CancellationToken) });
-                if (connectMethod?.Invoke(null, new object[] { ws, examId, 0, cancellationToken }) is Task connectTask)
-                {
-                    await connectTask;
-                    return;
-                }
-            }
-
-            string connectionUrl = $"{relayUrl}?role=teacher&examId={examId}";
-            await ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
-        }
-
         private async Task StartWebSocketReceiver()
         {
-            CourseGuard.Backend.Config.AppEnvironment.LoadDotEnvIfExists();
-            string relayUrl = CourseGuard.Backend.Config.AppEnvironment.GetOptional("RELAY_WS_URL") ?? "ws://localhost:8080/relay";
+            bool useApi = CourseGuard.Backend.Services.ServerApiClient.Enabled;
+            string? relayUrl = null;
+            if (!useApi)
+            {
+                CourseGuard.Backend.Config.AppEnvironment.LoadDotEnvIfExists();
+                relayUrl = CourseGuard.Backend.Config.AppEnvironment.GetOptional("RELAY_WS_URL") ?? "ws://localhost:8080/relay";
+            }
 
             while (!_cts.Token.IsCancellationRequested)
             {
@@ -155,9 +136,17 @@ namespace CourseGuard.Frontend.Forms.Teacher
                     _ws?.Dispose();
                     _ws = new ClientWebSocket();
 
-                    SetStatus("Đang kết nối tới Cloud Relay...");
-                    await ConnectMonitorWebSocketAsync(_ws, _examId, relayUrl, _cts.Token);
-                    SetStatus("Đã kết nối tới Cloud Relay. Đang chờ camera học sinh...");
+                    SetStatus(useApi ? "Đang kết nối tới Server..." : "Đang kết nối tới Cloud Relay...");
+                    if (useApi)
+                    {
+                        await CourseGuard.Backend.Services.ServerApiClient.ConnectMonitorAsync(_ws, _examId, 0, _cts.Token);
+                    }
+                    else
+                    {
+                        string connectionUrl = $"{relayUrl}?role=teacher&examId={_examId}";
+                        await _ws.ConnectAsync(new Uri(connectionUrl), _cts.Token);
+                    }
+                    SetStatus(useApi ? "Đã kết nối tới Server. Đang chờ camera học sinh..." : "Đã kết nối tới Cloud Relay. Đang chờ camera học sinh...");
 
                     try
                     {
@@ -439,6 +428,15 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 {
                     try
                     {
+                        if(url.StartsWith("api/monitor/evidence/",StringComparison.Ordinal))
+                        {
+                            var bytes=CourseGuard.Backend.Services.ServerApiClient.GetAsync<byte[]>(url).GetAwaiter().GetResult();
+                            using var imageStream=new MemoryStream(bytes);
+                            using var decoded=Image.FromStream(imageStream);
+                            using var viewer=new Form {Text="Ảnh vi phạm",Width=900,Height=650};
+                            using var preview=new PictureBox {Dock=DockStyle.Fill,SizeMode=PictureBoxSizeMode.Zoom,Image=new Bitmap(decoded)};
+                            viewer.Controls.Add(preview);viewer.ShowDialog(this);preview.Image?.Dispose();return;
+                        }
                         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                         {
                             FileName = url,

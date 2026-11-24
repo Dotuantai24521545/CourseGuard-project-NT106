@@ -330,66 +330,10 @@ namespace CourseGuard.Frontend.UserControls.Admin
             DateTime start = _reportStartDate.Value.Date;
             DateTime end = _reportEndDate.Value.Date.AddDays(1).AddTicks(-1); // End of day
 
-            string query = "";
-            
-            if (reportType == "Danh sách học viên")
-            {
-                query = @"
-                    SELECT u.ID, u.USERNAME, u.FULL_NAME, u.EMAIL, u.CREATED_AT, u.STATUS
-                    FROM USERS u
-                    JOIN ROLES r ON u.ROLE_ID = r.ID
-                    WHERE r.NAME = 'STUDENT'
-                    AND u.CREATED_AT BETWEEN @start AND @end
-                    ORDER BY u.CREATED_AT DESC";
-            }
-            else if (reportType == "Danh sách giảng viên")
-            {
-                query = @"
-                    SELECT u.ID, u.USERNAME, u.FULL_NAME, u.EMAIL, u.CREATED_AT, u.STATUS
-                    FROM USERS u
-                    JOIN ROLES r ON u.ROLE_ID = r.ID
-                    WHERE r.NAME = 'TEACHER'
-                    AND u.CREATED_AT BETWEEN @start AND @end
-                    ORDER BY u.CREATED_AT DESC";
-            }
-            else if (reportType == "Danh sách vi phạm")
-            {
-                query = @"
-                    SELECT v.ID, u.USERNAME, u.FULL_NAME, e.TITLE AS EXAM_TITLE, v.TYPE AS VIOLATION_TYPE, v.CREATED_AT
-                    FROM VIOLATIONS v
-                    JOIN USERS u ON v.USER_ID = u.ID
-                    LEFT JOIN EXAM_ATTEMPTS ea ON v.EXAM_ATTEMPT_ID = ea.ID
-                    LEFT JOIN EXAMS e ON ea.EXAM_ID = e.ID
-                    WHERE v.CREATED_AT BETWEEN @start AND @end
-                    ORDER BY v.CREATED_AT DESC";
-            }
-            else if (reportType == "Danh sách đăng nhập")
-            {
-                query = @"
-                    SELECT a.ID, COALESCE(u.USERNAME, 'SYSTEM') AS USERNAME, a.ACTION, a.DETAILS, a.IP_ADDRESS, a.CREATED_AT
-                    FROM AUDIT_LOGS a
-                    LEFT JOIN USERS u ON a.USER_ID = u.ID
-                    WHERE a.ACTION = 'LOGIN'
-                    AND a.CREATED_AT BETWEEN @start AND @end
-                    ORDER BY a.CREATED_AT DESC";
-            }
-            else
-            {
-                // Fallback or empty
-                dataGridView1.DataSource = null;
-                return;
-            }
-
-            var parameters = new Dictionary<string, (SqlDbType, object)>
-            {
-                { "@start", (SqlDbType.DateTime, start) },
-                { "@end", (SqlDbType.DateTime, end) }
-            };
-
             this.ShowSkeleton(SkeletonType.TableWithToolbar);
             try
             {
-                DataTable dt = await Task.Run(() => DatabaseAction.ExecuteQuery(query, parameters));
+                DataTable dt = await CourseGuard.Backend.Services.ServerApiClient.GetReportAsync(reportType ?? "",start,end);
                 dataGridView1.DataSource = dt;
             }
             catch (Exception ex)

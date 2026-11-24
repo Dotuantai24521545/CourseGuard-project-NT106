@@ -20,7 +20,8 @@ namespace CourseGuard
             try
             {
                 // Ensure default seed accounts exist (e.g. student/admin123)
-                new CourseGuardDbContext("").EnsureSeedAccounts();
+                if (!CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                    new CourseGuardDbContext("").EnsureSeedAccounts();
                 System.Windows.Forms.Application.Run(new RedirectForm());
             }
             catch (InvalidOperationException ex)

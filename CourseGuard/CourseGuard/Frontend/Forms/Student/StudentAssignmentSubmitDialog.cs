@@ -510,6 +510,8 @@ namespace CourseGuard.Frontend.Forms.Student
                     _submitStatus.Text = "Đã nộp bài thành công.";
 
                     // Update in-app notification
+                    if(!CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                    {
                     var notifRepo = new NotificationRepository();
                     notifRepo.Create(
                         userId: _studentId,
@@ -527,6 +529,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
                     string emailBody = $"Chào bạn,\n\nBạn đã nộp bài làm thành công cho bài tập '{assignmentTitle}'.\n\nTrân trọng,\nCourseGuard";
                     EmailQueueService.QueueEmail(studentEmail, "Xác nhận nộp bài tập: " + assignmentTitle, emailBody);
+                    }
 
                     MetaTheme.ShowModernDialog("Nộp bài thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     this.DialogResult = DialogResult.OK;

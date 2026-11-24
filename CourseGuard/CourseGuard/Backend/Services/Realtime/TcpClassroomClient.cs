@@ -34,6 +34,26 @@ namespace CourseGuard.Backend.Services.Realtime
         public async Task StartAsync()
         {
             _cts = new CancellationTokenSource();
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+            {
+                var states=new System.Collections.Generic.Dictionary<int,bool>();
+                while(!_cts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var current=await CourseGuard.Backend.Services.ServerApiClient.GetAsync<System.Collections.Generic.List<SessionState>>("api/classroom/status",_cts.Token);
+                        foreach(var state in current)
+                        {
+                            if(!states.TryGetValue(state.Id,out var old)||old!=state.IsOpened)ClassStatusChanged?.Invoke(this,new(state.Id,state.IsOpened));
+                            states[state.Id]=state.IsOpened;
+                        }
+                        await Task.Delay(3000,_cts.Token);
+                    }
+                    catch(OperationCanceledException){break;}
+                    catch{try{await Task.Delay(3000,_cts.Token);}catch(OperationCanceledException){break;}}
+                }
+                return;
+            }
             while (!_cts.Token.IsCancellationRequested)
             {
                 try
@@ -99,5 +119,6 @@ namespace CourseGuard.Backend.Services.Realtime
             _cts?.Cancel();
             _ws?.Dispose();
         }
+        public sealed record SessionState(int Id,bool IsOpened);
     }
 }

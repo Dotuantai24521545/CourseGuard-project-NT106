@@ -80,9 +80,30 @@ namespace CourseGuard.Frontend.UserControls.Classroom
             _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
-            _webView.CoreWebView2.WebMessageReceived += (_, args) =>
+            _webView.CoreWebView2.WebMessageReceived += async (_, args) =>
             {
                 string json = args.WebMessageAsJson;
+                if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                {
+                    try
+                    {
+                        using var request=JsonDocument.Parse(json);
+                        if(request.RootElement.TryGetProperty("type",out var type)&&type.GetString()=="request-classroom-ticket")
+                        {
+                            var source=new Uri(args.Source);
+                            if(!source.IsFile||!string.Equals(Path.GetFullPath(source.LocalPath),Path.GetFullPath(htmlPath),StringComparison.OrdinalIgnoreCase))return;
+                            var requestId=request.RootElement.GetProperty("requestId").GetString();
+                            try
+                            {
+                                var result=await CourseGuard.Backend.Services.ServerApiClient.PostAsync<JsonElement>($"api/classroom/{_options.SessionId}/ticket",new {});
+                                _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {type="classroom-ticket",requestId,ticket=result.GetProperty("ticket").GetString()}));
+                            }
+                            catch(Exception){_webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {type="classroom-ticket",requestId,error="Không được phép kết nối lớp học hoặc phiên đã hết hạn."}));}
+                            return;
+                        }
+                    }
+                    catch(JsonException){return;}
+                }
                 WebMessageReceived?.Invoke(this, json);
                 TryRaiseWebRtcStateChanged(json);
             };
@@ -312,12 +333,14 @@ namespace CourseGuard.Frontend.UserControls.Classroom
 
         private string BuildConfigInjectionScript()
         {
+            bool apiMode=CourseGuard.Backend.Services.ServerApiClient.Enabled;
             var config = new
             {
-                supabaseUrl = AppEnvironment.GetOptional("SUPABASE_URL") ?? string.Empty,
-                supabaseAnonKey = AppEnvironment.GetOptional("SUPABASE_ANON_KEY") ?? string.Empty,
-                signalingMode = AppEnvironment.GetOptional("WEBRTC_SIGNALING_MODE") ?? "table",
-                relayWsUrl = AppEnvironment.GetOptional("RELAY_WS_URL") ?? string.Empty,
+                apiMode,
+                supabaseUrl = apiMode?"":AppEnvironment.GetOptional("SUPABASE_URL") ?? string.Empty,
+                supabaseAnonKey = apiMode?"":AppEnvironment.GetOptional("SUPABASE_ANON_KEY") ?? string.Empty,
+                signalingMode = apiMode?"relay":AppEnvironment.GetOptional("WEBRTC_SIGNALING_MODE") ?? "table",
+                relayWsUrl = apiMode?CourseGuard.Backend.Services.ServerApiClient.ClassroomRelayUrl:AppEnvironment.GetOptional("RELAY_WS_URL") ?? string.Empty,
                 stunUrls = AppEnvironment.GetOptional("WEBRTC_STUN_URLS") ?? "stun:stun.l.google.com:19302",
                 iceServers = BuildIceServers(),
                 sessionId = _options.SessionId,

@@ -51,6 +51,13 @@ namespace CourseGuard.Backend.Services
 
         public async Task CheckNowAsync(CancellationToken cancellationToken = default)
         {
+#if !COURSEGUARD_SERVER
+            if(ServerApiClient.Enabled)
+            {
+                if(await ServerApiClient.PostAsync<int>("api/me/deadlines/check",new {},cancellationToken)>0)NotificationCreated?.Invoke(this,EventArgs.Empty);
+                return;
+            }
+#endif
             if (_disposed)
                 return;
 

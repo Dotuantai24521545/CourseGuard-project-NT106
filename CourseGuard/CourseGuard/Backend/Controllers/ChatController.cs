@@ -25,6 +25,7 @@ namespace CourseGuard.Backend.Controllers
 
         public List<ChatCourseModel> GetMyCourses(int userId)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<ChatCourseModel>>("api/courses").GetAwaiter().GetResult();
             if (userId <= 0)
             {
                 return new List<ChatCourseModel>();
@@ -35,6 +36,7 @@ namespace CourseGuard.Backend.Controllers
 
         public Task<List<ChatCourseModel>> GetMyCoursesAsync(int userId, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<ChatCourseModel>>("api/courses", cancellationToken);
             if (userId <= 0)
             {
                 return Task.FromResult(new List<ChatCourseModel>());
@@ -45,12 +47,14 @@ namespace CourseGuard.Backend.Controllers
 
         public int GetUnreadCount(int userId)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<int>("api/chat/unread-count").GetAwaiter().GetResult();
             LastErrorMessage = string.Empty;
             return userId <= 0 ? 0 : _dbContext.GetUnreadChatCount(userId);
         }
 
         public List<ChatCourseModel> GetUnreadCourses(int userId)
         {
+            if (ServerApiClient.Enabled) return GetMyCourses(userId).Where(c => c.UnreadCount > 0).ToList();
             LastErrorMessage = string.Empty;
             return userId <= 0
                 ? new List<ChatCourseModel>()
@@ -59,6 +63,7 @@ namespace CourseGuard.Backend.Controllers
 
         public void MarkAllRead(int userId)
         {
+            if (ServerApiClient.Enabled) { ServerApiClient.PostAsync("api/chat/read", new { }).GetAwaiter().GetResult(); return; }
             LastErrorMessage = string.Empty;
             if (userId > 0)
             {
@@ -68,6 +73,7 @@ namespace CourseGuard.Backend.Controllers
 
         public void MarkCourseRead(int userId, int courseId)
         {
+            if (ServerApiClient.Enabled) { ServerApiClient.PostAsync($"api/courses/{courseId}/read", new { }).GetAwaiter().GetResult(); return; }
             LastErrorMessage = string.Empty;
             if (userId > 0 && courseId > 0)
             {
@@ -77,6 +83,7 @@ namespace CourseGuard.Backend.Controllers
 
         public List<ChatMessageModel> GetMessages(int userId, int courseId, int limit = 100)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetChatMessagesAsync($"api/courses/{courseId}/messages?limit={limit}").GetAwaiter().GetResult();
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -89,6 +96,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<List<ChatMessageModel>> GetMessagesAsync(int userId, int courseId, int limit = 100, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.GetChatMessagesAsync($"api/courses/{courseId}/messages?limit={limit}", cancellationToken);
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -101,6 +109,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<List<ChatMessageModel>> GetMessagesBeforeAsync(int userId, int courseId, int beforeMessageId, int limit = 20, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.GetChatMessagesAsync($"api/courses/{courseId}/messages?before={beforeMessageId}&limit={limit}", cancellationToken);
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -113,6 +122,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<List<ChatMessageModel>> GetMessagesAfterAsync(int userId, int courseId, int afterMessageId, int limit = 50, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.GetChatMessagesAsync($"api/courses/{courseId}/messages?after={afterMessageId}&limit={limit}", cancellationToken);
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -125,6 +135,7 @@ namespace CourseGuard.Backend.Controllers
 
         public bool SendMessage(int userId, int courseId, string content)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<ChatMessageModel>($"api/courses/{courseId}/messages", new { content }).GetAwaiter().GetResult().Id > 0;
             LastErrorMessage = string.Empty;
             if (string.IsNullOrWhiteSpace(content))
             {
@@ -151,6 +162,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<ChatMessageModel?> SendMessageAsync(int userId, int courseId, string content, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<ChatMessageModel>($"api/courses/{courseId}/messages", new { content }, cancellationToken);
             LastErrorMessage = string.Empty;
             if (string.IsNullOrWhiteSpace(content))
             {
@@ -228,6 +240,11 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<ChatMessageModel?> SendFileMessageModelAsync(int userId, int courseId, string sourceFilePath, string caption = "", CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled)
+            {
+                if (!ValidateFile(sourceFilePath, out var error)) throw new InvalidOperationException(error);
+                return await ServerApiClient.PostAsync<ChatMessageModel?>($"api/courses/{courseId}/files", new { fileName=Path.GetFileName(sourceFilePath), mimeType=ResolveMimeType(Path.GetExtension(sourceFilePath)), caption, bytes=await File.ReadAllBytesAsync(sourceFilePath,cancellationToken) }, cancellationToken);
+            }
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -267,6 +284,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<byte[]?> GetFileMessageContentAsync(int userId, int courseId, int messageId, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.GetAsync<byte[]?>($"api/courses/{courseId}/files/{messageId}", cancellationToken);
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -297,6 +315,8 @@ namespace CourseGuard.Backend.Controllers
             string caption = "",
             CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled)
+                return await SendImageGroupMessageAsync(userId,courseId,new[]{new CompressedChatImageResult(compressedImagePath,originalFileName,0,0,false)},caption,cancellationToken);
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -370,6 +390,32 @@ namespace CourseGuard.Backend.Controllers
             string caption = "",
             CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled)
+            {
+                if(compressedImages.Count is <1 or >5) throw new InvalidOperationException("Chọn từ 1 đến 5 ảnh.");
+                var items=new List<object>();
+                long total=0;
+                foreach(var image in compressedImages)
+                {
+                    total+=new FileInfo(image.FilePath).Length;
+                    if(total>5*1024*1024)throw new InvalidOperationException("Tổng ảnh tối đa 5 MB.");
+                    items.Add(new { fileName=image.OriginalFileName,mimeType=ChatImageHelper.GetMimeType(image.FilePath),caption="",bytes=await File.ReadAllBytesAsync(image.FilePath,cancellationToken) });
+                }
+                var sent=await ServerApiClient.PostAsync<ChatMessageModel?>($"api/courses/{courseId}/images",new {caption,items},cancellationToken);
+                if(sent is not null)
+                {
+                    var folder=Path.Combine(Path.GetTempPath(),"CourseGuard","api-images",ServerApiClient.CurrentUser?.Id.ToString()??"unknown");
+                    Directory.CreateDirectory(folder);
+                    sent.ImageAttachments=compressedImages.Select((image,index)=>
+                    {
+                        var mime=ChatImageHelper.GetMimeType(image.FilePath);
+                        var cache=Path.Combine(folder,$"{sent.Id}-{index}"+(mime=="image/png"?".png":".jpg"));
+                        File.Copy(image.FilePath,cache,true);
+                        return new ChatImageAttachmentModel {Url=cache,Name=image.OriginalFileName,Size=new FileInfo(cache).Length,Mime=mime};
+                    }).ToList();
+                }
+                return sent;
+            }
             LastErrorMessage = string.Empty;
             if (!_dbContext.CanAccessCourseChat(userId, courseId))
             {
@@ -458,6 +504,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<int> CreatePollAsync(int teacherId, int courseId, string question, IReadOnlyList<string> options, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<int>($"api/courses/{courseId}/polls", new { question, options }, cancellationToken);
             LastErrorMessage = string.Empty;
             if (teacherId <= 0 || courseId <= 0)
             {
@@ -503,6 +550,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<bool> VotePollAsync(int userId, int pollId, int optionId, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<bool>($"api/polls/{pollId}/vote", new { optionId }, cancellationToken);
             LastErrorMessage = string.Empty;
             if (userId <= 0 || pollId <= 0 || optionId <= 0)
             {
@@ -537,6 +585,7 @@ namespace CourseGuard.Backend.Controllers
 
         public async Task<bool> ClosePollAsync(int teacherId, int pollId, CancellationToken cancellationToken = default)
         {
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<bool>($"api/polls/{pollId}/close", new { }, cancellationToken);
             LastErrorMessage = string.Empty;
             if (teacherId <= 0 || pollId <= 0)
             {

@@ -16,6 +16,7 @@ namespace CourseGuard.Backend.Services.Monitoring
         public const int HeaderLength = 30; // Updated from 29 to 30 to include FrameType
         public const int MaxPacketBytes = HeaderLength + MaxFrameBytes;
 
+#if !COURSEGUARD_SERVER
         public static Task<byte[]?> ReceiveBinaryMessageAsync(
             WebSocket webSocket,
             byte[] receiveBuffer,
@@ -28,6 +29,7 @@ namespace CourseGuard.Backend.Services.Monitoring
                 cancellationToken,
                 maxPacketBytes);
         }
+#endif
 
         public static byte[] BuildHeader(byte frameType, int examId, int studentId, int attemptId, long unixMillis, int jpegLength)
         {

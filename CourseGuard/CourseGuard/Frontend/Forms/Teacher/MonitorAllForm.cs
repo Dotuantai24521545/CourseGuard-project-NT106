@@ -23,6 +23,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
         private readonly List<int> _relayExamIds;
         private readonly object _fragmentLock = new();
         private readonly MemoryStream _fragmentBuffer = new();
+        private ApiMonitorReceiver? _apiReceiver;
         private bool _cleanedUp;
 
         public MonitorAllForm() : this(0, null)
@@ -49,23 +50,25 @@ namespace CourseGuard.Frontend.Forms.Teacher
             _flowLayoutPanel.BackColor = MetaTheme.Colors.FormBg;
             Controls.Add(_flowLayoutPanel);
 
-            TcpScreenMonitorService.Instance.FrameReceived += Service_FrameReceived;
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+            {
+                _apiReceiver=new();_apiReceiver.FrameReceived+=Service_FrameReceived;
+            }
+            else TcpScreenMonitorService.Instance.FrameReceived += Service_FrameReceived;
             FormClosing += MonitorAllForm_FormClosing;
         }
 
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            bool useAuthenticatedApi = IsAuthenticatedServerApiEnabled();
-            if (!useAuthenticatedApi)
+            if (_apiReceiver is not null)
             {
-                TcpScreenMonitorService.Instance.StartListening();
+                _apiReceiver.RunAsync().FireAndForgetSafe(this);
+                return;
             }
 
-            IReadOnlyList<int> examIds = _relayExamIds.Count > 0
-                ? _relayExamIds
-                : (useAuthenticatedApi ? new[] { 0 } : Array.Empty<int>());
-            foreach (int examId in examIds)
+            TcpScreenMonitorService.Instance.StartListening();
+            foreach (int examId in _relayExamIds)
             {
                 StartWebSocketRelayReceiverAsync(examId, _cts.Token).FireAndForgetSafe(this);
             }
@@ -82,6 +85,13 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 return;
 
             _cleanedUp = true;
+            if (_apiReceiver is not null)
+            {
+                _apiReceiver.FrameReceived -= Service_FrameReceived;
+                _apiReceiver.Dispose();
+                _apiReceiver = null;
+            }
+
             try
             {
                 _cts.Cancel();
@@ -127,36 +137,6 @@ namespace CourseGuard.Frontend.Forms.Teacher
             base.Dispose(disposing);
         }
 
-        private static bool IsAuthenticatedServerApiEnabled()
-        {
-            Type? serverApiType = typeof(MonitorAllForm).Assembly.GetType("CourseGuard.Backend.Services.ServerApiClient");
-            return serverApiType?.GetProperty("Enabled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null) is true;
-        }
-
-        private static async Task ConnectMonitorWebSocketAsync(
-            ClientWebSocket ws,
-            int examId,
-            string relayUrl,
-            CancellationToken cancellationToken)
-        {
-            Type? serverApiType = typeof(MonitorAllForm).Assembly.GetType("CourseGuard.Backend.Services.ServerApiClient");
-            if (serverApiType?.GetProperty("Enabled", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null) is true)
-            {
-                var connectMethod = serverApiType.GetMethod(
-                    "ConnectMonitorAsync",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
-                    new[] { typeof(ClientWebSocket), typeof(int), typeof(int), typeof(CancellationToken) });
-                if (connectMethod?.Invoke(null, new object[] { ws, examId, 0, cancellationToken }) is Task connectTask)
-                {
-                    await connectTask;
-                    return;
-                }
-            }
-
-            string connectionUrl = $"{relayUrl}?role=teacher&examId={examId}";
-            await ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
-        }
-
         private async Task StartWebSocketRelayReceiverAsync(int examId, CancellationToken cancellationToken)
         {
             CourseGuard.Backend.Config.AppEnvironment.LoadDotEnvIfExists();
@@ -168,7 +148,8 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 _relaySockets[examId] = ws;
                 try
                 {
-                    await ConnectMonitorWebSocketAsync(ws, examId, relayUrl, cancellationToken);
+                    string connectionUrl = $"{relayUrl}?role=teacher&examId={examId}";
+                    await ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
                     await ReceiveWebSocketMessagesAsync(ws, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

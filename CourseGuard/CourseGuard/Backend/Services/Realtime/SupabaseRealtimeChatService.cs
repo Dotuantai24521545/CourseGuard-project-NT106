@@ -245,12 +245,12 @@ namespace CourseGuard.Backend.Services.Realtime
                     var payload = root["payload"];
                     if (payload != null)
                     {
-                        var eventType = payload["type"]?.ToString() ?? payload["event"]?.ToString() ?? "INSERT";
-                        var table = payload["table"]?.ToString();
                         var data = payload["data"];
+                        var eventType = data?["type"]?.ToString() ?? payload["type"]?.ToString() ?? payload["event"]?.ToString() ?? "INSERT";
+                        var table = data?["table"]?.ToString() ?? payload["table"]?.ToString();
                         if (data != null)
                         {
-                            var record = data["record"];
+                            var record = eventType == "DELETE" ? data["old_record"] : data["record"];
                             if (record != null)
                             {
                                 if (string.Equals(table, "messages", StringComparison.OrdinalIgnoreCase))

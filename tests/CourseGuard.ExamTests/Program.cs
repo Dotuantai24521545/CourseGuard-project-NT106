@@ -486,16 +486,22 @@ try
         }
         Check(threwCancel, "Canceled token must throw OperationCanceledException");
 
-        // 5. Verify MonitorAllForm and MonitorPopupForm source wiring for EndOfMessage reassembly and authenticated ServerApiClient compatibility.
+        // 5. Verify MonitorAllForm, ApiMonitorReceiver, and MonitorPopupForm source wiring for EndOfMessage reassembly and authenticated ServerApiClient compatibility.
         string repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
         string monitorAll = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "MonitorAllForm.cs"));
+        string apiMonitorReceiver = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Backend", "Services", "Monitoring", "ApiMonitorReceiver.cs"));
         string monitorPopup = File.ReadAllText(Path.Combine(repoRoot, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Teacher", "MonitorPopupForm.cs"));
-        Check(monitorAll.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal) &&
-              monitorAll.Contains("ConnectMonitorAsync", StringComparison.Ordinal),
-            "MonitorAllForm must reassemble messages until EndOfMessage and preserve authenticated ServerApiClient WebSocket support");
-        Check(monitorPopup.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal) &&
-              monitorPopup.Contains("ConnectMonitorAsync", StringComparison.Ordinal),
-            "MonitorPopupForm must reassemble messages until EndOfMessage and preserve authenticated ServerApiClient WebSocket support");
+        Check(monitorAll.Contains("ApiMonitorReceiver", StringComparison.Ordinal) &&
+              monitorAll.Contains("ServerApiClient.Enabled", StringComparison.Ordinal) &&
+              monitorAll.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal),
+            "MonitorAllForm must route API mode through ApiMonitorReceiver and reassemble non-API relay messages until EndOfMessage");
+        Check(apiMonitorReceiver.Contains("ServerApiClient.ConnectMonitorAsync", StringComparison.Ordinal) &&
+              apiMonitorReceiver.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal),
+            "ApiMonitorReceiver must connect via ServerApiClient.ConnectMonitorAsync and reassemble binary frames until EndOfMessage");
+        Check(monitorPopup.Contains("ServerApiClient.ConnectMonitorAsync", StringComparison.Ordinal) &&
+              monitorPopup.Contains("ReceiveBinaryMessageAsync", StringComparison.Ordinal) &&
+              monitorPopup.Contains("api/monitor/evidence/", StringComparison.Ordinal),
+            "MonitorPopupForm must preserve authenticated ServerApiClient WebSocket/evidence support and reassemble messages until EndOfMessage");
     });
 }
 finally { if (Directory.Exists(cacheDirectory)) Directory.Delete(cacheDirectory, recursive: true); }

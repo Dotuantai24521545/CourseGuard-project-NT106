@@ -116,7 +116,9 @@ namespace CourseGuard.Backend.Services.Monitoring
                     _ws = new ClientWebSocket();
                     
                     string connectionUrl = $"{_relayUri}?role=student&examId={_examId}&studentId={_studentId}&attemptId={_attemptId}";
-                    await _ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
+                    if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                        await CourseGuard.Backend.Services.ServerApiClient.ConnectMonitorAsync(_ws,_examId,_attemptId,cancellationToken);
+                    else await _ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
                     _connectionLossTracker.ObserveConnected();
 
                     // Chạy song song luồng nhận lệnh điều chỉnh từ giáo viên
