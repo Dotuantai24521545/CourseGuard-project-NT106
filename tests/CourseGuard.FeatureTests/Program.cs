@@ -2508,6 +2508,16 @@ Run("plan 04 UserController sets temp expiry when approving password reset", () 
         "UserController RESET action must pass expiry to UpdateUserPassword");
 });
 
+Run("login page uses the verified identity after OTP", () =>
+{
+    string root = RepoRoot();
+    string source = File.ReadAllText(Path.Combine(root, "CourseGuard", "CourseGuard", "Frontend", "Forms", "Login", "LoginPage.cs"));
+    int complete = source.IndexOf("loginResult = AuthService.CompleteMfaLogin(user);", StringComparison.Ordinal);
+    int guard = source.IndexOf("!loginResult.Succeeded || loginResult.User is not UserModel finalUser", StringComparison.Ordinal);
+    int session = source.IndexOf("CurrentUser = finalUser;", StringComparison.Ordinal);
+    AssertTrue(complete >= 0 && guard > complete && session > guard, "The page must use the successful post-OTP result before creating the session");
+});
+
 Run("plan 04 LoginPage handles TempPasswordExpired error code", () =>
 {
     string root = RepoRoot();

@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $pidFile=Join-Path $root '.local/server.pid'
 if(!(Test-Path -LiteralPath $pidFile)){Write-Output 'Không có server local do script này quản lý.';return}

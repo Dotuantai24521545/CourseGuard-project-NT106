@@ -133,7 +133,12 @@ public static class ServerApiClient
     {
         challenge = null;
         CurrentUser = null;
-        var result = await PostAsync<JsonElement>("api/auth/login", new { username, password, deviceName }, ct).ConfigureAwait(false);
+        using var response = await Transport.Value.PostAsJsonAsync("api/auth/login", new { username, password, deviceName }, ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Forbidden)
+            return LoginResultModel.Error(LoginErrorCodes.DeviceBlocked);
+
+        await EnsureSuccess(response, ct).ConfigureAwait(false);
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct).ConfigureAwait(false);
         challenge = result.GetProperty("challengeId").GetString();
         return LoginResultModel.MfaRequired(new UserModel { Username = username });
     }

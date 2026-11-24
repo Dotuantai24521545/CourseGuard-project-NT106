@@ -37,7 +37,7 @@ var worker = Task.Run(async () =>
             case "/api/auth/verify":
                 if (!body.Contains("test-challenge")) throw new Exception("Challenge not bound to verify");
                 ctx.Response.SetCookie(new Cookie("CourseGuard.Session", "test-session", "/"));
-                output = "{\"id\":42,\"username\":\"test\",\"role\":\"STUDENT\",\"fullName\":\"Test\"}"; break;
+                output = "{\"id\":42,\"username\":\"test\",\"role\":\"STUDENT\",\"status\":\"ACTIVE\",\"fullName\":\"Test\"}"; break;
             case "/api/courses/7/messages":
                 if (ctx.Request.Cookies["CourseGuard.Session"]?.Value != "test-session") throw new Exception("Session cookie missing");
                 if (body.Contains("senderId", StringComparison.OrdinalIgnoreCase) || body.Contains("userId", StringComparison.OrdinalIgnoreCase)) throw new Exception("Client controls sender identity");
@@ -77,7 +77,7 @@ if (!login.IsMfaRequired || login.Succeeded) throw new Exception("Login bypassed
 Console.WriteLine("PASS login requires server OTP challenge");
 if (!await ServerApiClient.VerifyAsync("123456")) throw new Exception("OTP verify failed");
 var complete = auth.CompleteMfaLogin(login.User!);
-if (complete.User?.Id != 42 || !complete.Succeeded) throw new Exception("Server identity not used");
+if (complete.User is not { Id: 42, Role: "STUDENT", Status: "ACTIVE" } || !complete.Succeeded) throw new Exception("Server identity not used");
 Console.WriteLine("PASS verified server identity used by WinForms");
 var chat = new ChatController(db);
 var message = await chat.SendMessageAsync(999, 7, "hello");

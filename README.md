@@ -41,7 +41,7 @@ Cần Windows, .NET SDK 10, WebView2 Runtime và database dev của nhóm đã k
 2. Tại gốc repo, chạy:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1
+powershell.exe -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1
 ```
 
 Script build lần đầu, chạy server nền tại `http://127.0.0.1:5080`, rồi mở WinForms. Gói chạy nằm ở `.local/server` và `.local/client`. Cấu hình client chỉ có `COURSEGUARD_API_URL`. Chạy lại script để mở thêm client.
@@ -58,8 +58,8 @@ COURSEGUARD_API_URL=http://127.0.0.1:5080
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/Stop-CourseGuardServer.ps1
-powershell -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1 -BuildOnly
-powershell -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1
+powershell.exe -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1 -BuildOnly
+powershell.exe -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1
 ```
 
 Script dừng chỉ tác động tới server của repo này. Đóng cửa sổ WinForms không tự dừng server nền. Nếu chỉ mở thêm app và không đổi code, dùng lệnh Start bình thường, không cần build lại.
@@ -82,7 +82,7 @@ Database dev có thể dùng chung, nên việc thêm/sửa/xóa dữ liệu ả
 Triển khai server Windows với HTTPS, rồi chạy:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1 -ClientOnly -ApiUrl https://YOUR_SERVER
+powershell.exe -ExecutionPolicy Bypass -File scripts/Start-CourseGuard.ps1 -ClientOnly -ApiUrl https://YOUR_SERVER
 ```
 
 Không đưa mật khẩu database, SMTP hoặc khóa AI vào client. OTP gửi tới email trong bản ghi tài khoản; SMTP trong cấu hình server là bên gửi thư.
