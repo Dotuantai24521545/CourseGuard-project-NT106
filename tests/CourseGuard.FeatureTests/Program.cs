@@ -1422,6 +1422,82 @@ Run("course chat panel ignores stale messages when course loads complete out of 
         throw new InvalidOperationException(failure.Message, failure);
 });
 
+Run("course chat panel shows pending-access hint instead of error and stops polling", () =>
+{
+    Exception? failure = null;
+    bool previousStartRealtime = CourseChatPanel.StartRealtimeForTesting;
+    try
+    {
+        CourseChatPanel.StartRealtimeForTesting = false;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+
+                using var panel = new CourseChatPanel(
+                    99,
+                    (ChatController)RuntimeHelpers.GetUninitializedObject(typeof(ChatController)),
+                    allowPollCreation: false);
+
+                int deniedRequests = 0;
+                panel.MessageLoaderForTesting = (_, courseId, _, _) =>
+                {
+                    if (courseId == 30)
+                    {
+                        deniedRequests++;
+                        return Task.FromException<List<ChatMessageModel>>(
+                            new CourseGuard.Backend.Services.ServerAccessDeniedException("Bạn không có quyền thực hiện thao tác này."));
+                    }
+
+                    return Task.FromResult(new List<ChatMessageModel> { NewChatMessage(401, courseId, "approved course") });
+                };
+
+                Task pendingLoad = panel.LoadCourseAsync(30, "Pending course");
+                WaitForTaskWithMessagePump(pendingLoad);
+                AssertFalse(pendingLoad.IsFaulted, "a 403 for a pending enrollment must not escape as a background error dialog");
+
+                TextBox input = GetFieldValue<TextBox>(panel, "_input");
+                Button send = GetFieldValue<Button>(panel, "_send");
+                ChatMessageListControl messageList = GetFieldValue<ChatMessageListControl>(panel, "_messageList");
+                AssertTrue(panel.IsChatAccessDenied, "panel must remember that the server refused this course");
+                AssertFalse(input.Enabled, "composer input must be disabled while chat access is refused");
+                AssertFalse(send.Enabled, "send button must be disabled while chat access is refused");
+                AssertEqual(CourseChatPanel.ChatAccessDeniedText, messageList.EmptyStateText);
+
+                MethodInfo refresh = typeof(CourseChatPanel).GetMethod(
+                    "RefreshMessagesAsync",
+                    BindingFlags.Instance | BindingFlags.NonPublic,
+                    new[] { typeof(CancellationToken) })!;
+                WaitForTaskWithMessagePump((Task)refresh.Invoke(panel, new object[] { CancellationToken.None })!);
+                AssertEqual("1", deniedRequests.ToString());
+
+                Task approvedLoad = panel.LoadCourseAsync(40, "Approved course");
+                WaitForTaskWithMessagePump(approvedLoad);
+                AssertFalse(panel.IsChatAccessDenied, "opening another course must clear the refused state");
+                AssertTrue(input.Enabled && send.Enabled, "composer must be usable again in a course the user can access");
+                AssertEqual(ChatMessageListControl.DefaultEmptyStateText, messageList.EmptyStateText);
+                AssertEqual("401", string.Join(",", messageList.LoadedMessageIds));
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+    }
+    finally
+    {
+        CourseChatPanel.StartRealtimeForTesting = previousStartRealtime;
+    }
+
+    if (failure != null)
+        throw new InvalidOperationException(failure.Message, failure);
+});
+
 Run("legacy student and teacher chat constructors remain available", () =>
 {
     AssertTrue(

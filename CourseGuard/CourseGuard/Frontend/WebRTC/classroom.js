@@ -311,6 +311,19 @@
                 }, { joinedAt: state.joinedAt });
             }
             state.signaling.onSignal(handleSignal);
+            // Relay signaling only: after a network blip the server may have told peers we left.
+            state.signaling.onReconnected?.(() => {
+                if (state.started) announcePresence();
+            });
+            state.signaling.onTerminated?.(async ({ code, reason }) => {
+                if (code === 4001) {
+                    post("room-closed", { reason });
+                    await cleanup(false, true);
+                    return;
+                }
+                reportError(new Error(reason), "Mất kết nối máy chủ lớp học.");
+                await cleanup(false, false);
+            });
             await state.signaling.start();
 
             state.started = true;

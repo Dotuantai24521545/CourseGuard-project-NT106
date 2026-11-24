@@ -34,7 +34,7 @@ Chat lấy tin mới qua API mỗi 2 giây. Tệp chat/bài tập được tải
 
 WebView2 lấy vé signaling hạn 30 giây, dùng một lần, qua phiên WinForms. Server kiểm tra lớp học và tự gán danh tính người gửi; tín hiệu chỉ chuyển trong cùng lớp. Kết nối native dùng cookie. Trạng thái mở/đóng lớp được đọc qua API mỗi 3 giây. Camera giám sát dùng WebSocket xác thực và chỉ chuyển khung hình cho giảng viên phụ trách.
 
-WebRTC khác mạng còn phụ thuộc STUN/TURN, firewall và quyền camera/mic. Chưa nghiệm thu camera/mic hai máy khác mạng trong lượt chuyển đổi này.
+WebRTC khác mạng còn phụ thuộc STUN/TURN, firewall và quyền camera/mic. Chưa nghiệm thu camera/mic hai máy khác mạng trong lượt chuyển đổi này. STUN/TURN cấu hình ở server bằng `WEBRTC_*`; giới hạn tệp chat, hành vi reconnect/đóng lớp và kịch bản kiểm thử hai máy: xem [REALTIME_STORAGE.md](REALTIME_STORAGE.md).
 
 ## Kiểm thử
 

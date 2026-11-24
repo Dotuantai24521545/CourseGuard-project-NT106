@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using CourseGuard.Backend.Controllers;
 using CourseGuard.Backend.Models;
+using CourseGuard.Backend.Services;
 using CourseGuard.Backend.Services.Realtime;
 using CourseGuard.Frontend.Forms.Teacher;
 using CourseGuard.Frontend.Helpers;
@@ -49,6 +50,13 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
         private bool _isSending;
         private bool _uiAlive = true;
         private int _nextTemporaryMessageId = -1;
+        private int _accessDeniedCourseId;
+
+        internal const string ChatAccessDeniedText =
+            "Bạn chưa có quyền tham gia trao đổi trong khóa học này. Nếu vừa đăng ký, hãy chờ giáo viên duyệt rồi mở lại khóa học.";
+
+        /// <summary>True while the server refuses the selected course's chat (pending or removed enrollment).</summary>
+        internal bool IsChatAccessDenied => _selectedCourseId > 0 && _accessDeniedCourseId == _selectedCourseId;
         private static Color CourseSurfaceColor => AppColors.IsDarkMode ? AppColors.BgCard : Color.White;
 
         internal static bool StartRealtimeForTesting = true;
@@ -124,6 +132,8 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
             var (loadGeneration, loadCts) = BeginCourseMessageLoad(cancellationToken);
             _selectedCourseId = courseId;
             _hasLoadedInitialMessages = false;
+            // Opening a course again re-checks access, so a student approved in the meantime can chat right away.
+            ApplyChatAccessState(0);
             _messageList.ClearMessages();
             _title.Text = string.IsNullOrWhiteSpace(courseName)
                 ? "Nội dung trao đổi"
@@ -436,9 +446,17 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
             bool skipIfLoading = false)
         {
             bool countedActiveLoad = false;
+            int requestedCourseId = 0;
             try
             {
                 if (!_uiAlive || IsDisposed || _selectedCourseId <= 0 || _userId <= 0)
+                {
+                    return;
+                }
+
+                // The server already refused this course (for example a pending enrollment): stop polling it until the
+                // course is opened again, instead of sending a request that fails every 2 seconds.
+                if (_accessDeniedCourseId == _selectedCourseId)
                 {
                     return;
                 }
@@ -454,6 +472,7 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
 
                 int userId = _userId;
                 int courseId = _selectedCourseId;
+                requestedCourseId = courseId;
                 List<ChatMessageModel> messages;
                 int newestMessageId = _messageList.NewestMessageId ?? 0;
                 if (!_hasLoadedInitialMessages || newestMessageId <= 0)
@@ -498,6 +517,18 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
             catch (ObjectDisposedException)
             {
                 return;
+            }
+            catch (ServerAccessDeniedException)
+            {
+                // Expected for a student whose enrollment is not approved yet: show it in the panel, not as an error dialog.
+                if (_uiAlive
+                    && !IsDisposed
+                    && requestedCourseId > 0
+                    && _selectedCourseId == requestedCourseId
+                    && _messageLoadGeneration == loadGeneration)
+                {
+                    ApplyChatAccessState(requestedCourseId);
+                }
             }
             finally
             {
@@ -699,7 +730,7 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
 
         private void OnChatDragEnter(object? sender, DragEventArgs e)
         {
-            if (e.Data?.GetDataPresent(DataFormats.FileDrop) == true)
+            if (!IsChatAccessDenied && e.Data?.GetDataPresent(DataFormats.FileDrop) == true)
             {
                 string[] files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
                 e.Effect = files.Length > 0 && ChatImageHelper.IsSupportedImage(files[0]) ? DragDropEffects.Copy : DragDropEffects.None;
@@ -909,6 +940,11 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
 
         private async Task SendComposerAsync()
         {
+            if (IsChatAccessDenied)
+            {
+                return;
+            }
+
             if (_imagePreviewStrip.SelectedImages.Count > 0)
             {
                 await SendImageGroupAsync(_imagePreviewStrip.SelectedImages);
@@ -1195,6 +1231,48 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
             }
         }
 
+        /// <summary>
+        /// Records which course the server refused (0 clears it) and switches the panel between the normal chat and a
+        /// read-only hint, so a pending enrollment shows a message in place of an error dialog.
+        /// </summary>
+        private void ApplyChatAccessState(int deniedCourseId)
+        {
+            _accessDeniedCourseId = deniedCourseId;
+            if (!_uiAlive || IsDisposed)
+            {
+                return;
+            }
+
+            if (InvokeRequired)
+            {
+                try
+                {
+                    BeginInvoke(new Action(() => ApplyChatAccessState(deniedCourseId)));
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                return;
+            }
+
+            bool denied = deniedCourseId > 0;
+            if (denied)
+            {
+                _messageList.ClearMessages();
+                _attachStrip.Close();
+            }
+
+            _messageList.EmptyStateText = denied ? ChatAccessDeniedText : ChatMessageListControl.DefaultEmptyStateText;
+            bool composerEnabled = !denied && !_isSending;
+            _send.Enabled = composerEnabled;
+            _attachMenu.Enabled = composerEnabled;
+            _input.Enabled = composerEnabled;
+        }
+
         private void SetComposerSending(bool sending, string? statusText = null)
         {
             _isSending = sending;
@@ -1226,12 +1304,12 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
 
             if (!_send.IsDisposed)
             {
-                _send.Enabled = !sending;
+                _send.Enabled = !sending && !IsChatAccessDenied;
             }
 
             if (!_attachMenu.IsDisposed)
             {
-                _attachMenu.Enabled = !sending;
+                _attachMenu.Enabled = !sending && !IsChatAccessDenied;
                 _attachMenu.Text = sending ? (statusText ?? "...") : "+";
             }
 
@@ -1242,7 +1320,7 @@ namespace CourseGuard.Frontend.UserControls.Shared.CourseWorkspace
 
             if (!_input.IsDisposed)
             {
-                _input.Enabled = !sending;
+                _input.Enabled = !sending && !IsChatAccessDenied;
             }
         }
 

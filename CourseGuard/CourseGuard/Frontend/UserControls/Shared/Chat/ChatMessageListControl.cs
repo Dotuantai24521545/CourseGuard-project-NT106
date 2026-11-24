@@ -70,11 +70,22 @@ namespace CourseGuard.Frontend.UserControls.Shared.Chat
             _emptyStateLabel.Dock = DockStyle.Fill;
             _emptyStateLabel.Font = AppFonts.Body;
             _emptyStateLabel.ForeColor = AppColors.TextMuted;
-            _emptyStateLabel.Text = "Chưa có tin nhắn nào. Hãy bắt đầu cuộc trò chuyện!";
+            _emptyStateLabel.Text = DefaultEmptyStateText;
             _emptyStateLabel.TextAlign = ContentAlignment.MiddleCenter;
             Controls.Add(_emptyStateLabel);
             _emptyStateLabel.BringToFront();
             UpdateEmptyState();
+        }
+
+        public const string DefaultEmptyStateText = "Chưa có tin nhắn nào. Hãy bắt đầu cuộc trò chuyện!";
+
+        /// <summary>Text shown while the list is empty, for example a hint that the chat is not available yet.</summary>
+        [System.ComponentModel.Browsable(false)]
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        public string EmptyStateText
+        {
+            get => _emptyStateLabel.Text;
+            set => _emptyStateLabel.Text = string.IsNullOrWhiteSpace(value) ? DefaultEmptyStateText : value;
         }
 
         public void ClearMessages()
