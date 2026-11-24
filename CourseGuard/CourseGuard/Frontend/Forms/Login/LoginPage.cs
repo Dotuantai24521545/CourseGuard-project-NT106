@@ -922,12 +922,14 @@ namespace CourseGuard.Frontend.Forms.Login
                     loginResult = AuthService.CompleteMfaLogin(user);
                 }
 
-                Task<string> ipAddressTask = GetLocalIPAddressAsync();
-                await ipAddressTask;
-                LogLoginTiming("load user data", stopwatch);
+                if (!loginResult.Succeeded || loginResult.User is not UserModel finalUser)
+                {
+                    CourseGuard.Frontend.Theme.MetaTheme.ShowModernDialog("Không thể hoàn tất đăng nhập. Vui lòng thử lại.", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
 
-                UserModel finalUser = user;
-                string ipAddress = await ipAddressTask;
+                string ipAddress = await GetLocalIPAddressAsync();
+                LogLoginTiming("load user data", stopwatch);
 
                 if (!string.Equals(finalUser.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
                 {

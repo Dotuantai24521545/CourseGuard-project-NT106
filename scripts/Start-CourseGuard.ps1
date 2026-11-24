@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ApiUrl='http://127.0.0.1:5080',
     [switch]$ClientOnly,
     [switch]$ServerOnly,
