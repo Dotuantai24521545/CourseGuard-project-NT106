@@ -52,6 +52,7 @@ internal sealed class ClassroomApi
             if(updated&&!input.IsOpened)DisconnectStudents(session,teacher);
             return Results.Ok(updated);
         }).RequireAuthorization(p=>p.RequireRole("TEACHER"));
+        api.MapGet("/classroom/ice-servers",()=>Results.Ok(IceServerConfig.FromEnvironment()));
         api.MapPost("/classroom/{session:int}/ticket",async(int session,ClaimsPrincipal p,CourseGuardDbContext db,CancellationToken ct)=>
         {
             int user=int.Parse(p.FindFirstValue(ClaimTypes.NameIdentifier)!);

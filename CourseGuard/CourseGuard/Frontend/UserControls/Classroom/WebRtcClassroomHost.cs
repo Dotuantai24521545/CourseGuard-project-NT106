@@ -59,7 +59,7 @@ namespace CourseGuard.Frontend.UserControls.Classroom
             AppEnvironment.LoadDotEnvIfExists();
 
             string htmlPath = ResolveClassroomHtmlPath();
-            string configScript = BuildConfigInjectionScript();
+            string configScript = BuildConfigInjectionScript(await LoadServerIceServersAsync());
 
             string userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -331,7 +331,31 @@ namespace CourseGuard.Frontend.UserControls.Classroom
                 outputCandidate);
         }
 
-        private string BuildConfigInjectionScript()
+        /// <summary>
+        /// In API mode the server owns STUN/TURN settings (GET api/classroom/ice-servers), so TURN can be
+        /// added for cross-network classes without editing every client. Falls back to the local env.
+        /// </summary>
+        private static async Task<object[]?> LoadServerIceServersAsync()
+        {
+            if (!CourseGuard.Backend.Services.ServerApiClient.Enabled)
+                return null;
+
+            try
+            {
+                using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var servers = await CourseGuard.Backend.Services.ServerApiClient.GetAsync<JsonElement>("api/classroom/ice-servers", timeout.Token);
+                if (servers.ValueKind != JsonValueKind.Array || servers.GetArrayLength() == 0)
+                    return null;
+                return servers.EnumerateArray().Select(server => (object)server.Clone()).ToArray();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Classroom ICE config fallback: {ex.Message}");
+                return null;
+            }
+        }
+
+        private string BuildConfigInjectionScript(object[]? serverIceServers)
         {
             bool apiMode=CourseGuard.Backend.Services.ServerApiClient.Enabled;
             var config = new
@@ -342,7 +366,7 @@ namespace CourseGuard.Frontend.UserControls.Classroom
                 signalingMode = apiMode?"relay":AppEnvironment.GetOptional("WEBRTC_SIGNALING_MODE") ?? "table",
                 relayWsUrl = apiMode?CourseGuard.Backend.Services.ServerApiClient.ClassroomRelayUrl:AppEnvironment.GetOptional("RELAY_WS_URL") ?? string.Empty,
                 stunUrls = AppEnvironment.GetOptional("WEBRTC_STUN_URLS") ?? "stun:stun.l.google.com:19302",
-                iceServers = BuildIceServers(),
+                iceServers = serverIceServers ?? BuildIceServers(),
                 sessionId = _options.SessionId,
                 roomId = _options.RoomId,
                 userId = _options.UserId,
