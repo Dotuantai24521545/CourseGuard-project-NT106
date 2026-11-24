@@ -50,7 +50,13 @@ internal static class TeacherApi
         group.MapPost("/CreateScheduleItem", (CreateScheduleItemRequest request, ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(new TeacherController(db).CreateScheduleItem(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!) ,request.input)));
         group.MapPost("/UpdateScheduleItem", (UpdateScheduleItemRequest request, ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(new TeacherController(db).UpdateScheduleItem(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!) ,request.input)));
         group.MapPost("/DeleteScheduleItem", (DeleteScheduleItemRequest request, ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(new TeacherController(db).DeleteScheduleItem(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!) ,request.scheduleId)));
-        group.MapPost("/UpdateSessionStatusAsync", async (UpdateSessionStatusAsyncRequest request, ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(await new TeacherController(db).UpdateSessionStatusAsync(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!) ,request.sessionId, request.isOpened, request.meetingLink)));
+        group.MapPost("/UpdateSessionStatusAsync", async (UpdateSessionStatusAsyncRequest request, ClaimsPrincipal principal, CourseGuardDbContext db, ClassroomApi classroom) =>
+        {
+            int teacherId = int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            bool updated = await new TeacherController(db).UpdateSessionStatusAsync(teacherId, request.sessionId, request.isOpened, request.meetingLink);
+            if (updated && !request.isOpened) classroom.DisconnectStudents(request.sessionId, teacherId);
+            return Results.Ok(updated);
+        });
         group.MapPost("/GetOpenExamsCount", (ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(new TeacherController(db).GetOpenExamsCount(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!))));
         group.MapPost("/GetActiveExamSessions", (ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(new TeacherController(db).GetActiveExamSessions(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!))));
         group.MapPost("/GetStudentSubmissionsAsync", async (GetStudentSubmissionsAsyncRequest request, ClaimsPrincipal principal, CourseGuardDbContext db) => Results.Ok(await new TeacherController(db).GetStudentSubmissionsAsync(int.Parse(principal.FindFirstValue(ClaimTypes.NameIdentifier)!) ,request.courseId)));
