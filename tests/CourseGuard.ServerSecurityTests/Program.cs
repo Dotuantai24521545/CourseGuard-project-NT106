@@ -17,6 +17,7 @@ var replacement = challenges.Add(42, "654321", "hash-v2");
 Check(challenges.Consume(token, "123456") is null, "new challenge invalidates previous challenge for user");
 var verified = challenges.Consume(replacement, "654321");
 Check(verified?.PasswordVersion == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("hash-v2"))), "challenge is bound to password version");
+RealtimeStorageTests.Run(Check);
 sealed class Clock : TimeProvider
 {
     private DateTimeOffset now = DateTimeOffset.UtcNow;

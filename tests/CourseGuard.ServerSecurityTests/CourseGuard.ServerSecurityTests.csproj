@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
-  <ItemGroup><Compile Include="../../CourseGuard/CourseGuard.Server/Challenges.cs" Link="Challenges.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../CourseGuard/CourseGuard.Server/Challenges.cs" Link="Challenges.cs" />
+    <Compile Include="../../CourseGuard/CourseGuard.Server/ChatUploadPolicy.cs" Link="ChatUploadPolicy.cs" />
+    <Compile Include="../../CourseGuard/CourseGuard.Server/ClassroomRoster.cs" Link="ClassroomRoster.cs" />
+    <Compile Include="../../CourseGuard/CourseGuard.Server/IceServerConfig.cs" Link="IceServerConfig.cs" /></ItemGroup>
 </Project>
