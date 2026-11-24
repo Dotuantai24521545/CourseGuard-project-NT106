@@ -6,9 +6,16 @@ namespace CourseGuard.Frontend.Forms.Student
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
+            if (disposing)
             {
-                components.Dispose();
+                CleanupExamResources();
+                _timer.Dispose();
+                _antiCheatTimer.Dispose();
+                _monitoringCts.Dispose();
+                if (components != null)
+                {
+                    components.Dispose();
+                }
             }
             base.Dispose(disposing);
         }

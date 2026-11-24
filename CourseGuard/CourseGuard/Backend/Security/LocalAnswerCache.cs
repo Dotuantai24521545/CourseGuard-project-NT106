@@ -1,7 +1,9 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -444,8 +446,27 @@ namespace CourseGuard.Backend.Security
                 {
                     if (temporaryPath != null)
                     {
-                        try { File.Delete(temporaryPath); } catch { }
+                        DeleteFileWithRetry(temporaryPath);
                     }
+                }
+            }
+        }
+
+        private static void DeleteFileWithRetry(string path)
+        {
+            for (int attempt = 1; File.Exists(path); attempt++)
+            {
+                try
+                {
+                    File.Delete(path);
+                }
+                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < IoRetryCount)
+                {
+                    System.Threading.Thread.Sleep(15 * attempt);
+                }
+                catch
+                {
+                    return;
                 }
             }
         }
@@ -623,6 +644,81 @@ namespace CourseGuard.Backend.Security
 
             return LoadAll(attemptId).Count == 0;
         }
+
+        public static int ApplyCachedAnswersToSession<TQuestion>(
+            int attemptId,
+            IEnumerable<TQuestion>? questions,
+            Func<TQuestion, int> getQuestionId,
+            Action<TQuestion, string> setSelectedOption)
+        {
+            ArgumentNullException.ThrowIfNull(getQuestionId);
+            ArgumentNullException.ThrowIfNull(setSelectedOption);
+
+            if (attemptId <= 0 || questions == null)
+            {
+                return 0;
+            }
+
+            var cachedAnswers = LoadAll(attemptId);
+            if (cachedAnswers.Count == 0)
+            {
+                return 0;
+            }
+
+            var latestByQuestionId = new Dictionary<int, CachedAnswer>();
+            lock (CacheLock)
+            {
+                foreach (var cached in cachedAnswers)
+                {
+                    if (cached.QuestionId <= 0 || string.IsNullOrWhiteSpace(cached.SelectedOption))
+                    {
+                        continue;
+                    }
+
+                    if (LatestOnlineByQuestion.TryGetValue((attemptId, cached.QuestionId), out var onlineSaved) &&
+                        onlineSaved.Version >= cached.Version)
+                    {
+                        continue;
+                    }
+
+                    if (!latestByQuestionId.TryGetValue(cached.QuestionId, out var existing) ||
+                        cached.Version > existing.Version ||
+                        (cached.Version == existing.Version && cached.AnsweredAt >= existing.AnsweredAt))
+                    {
+                        latestByQuestionId[cached.QuestionId] = cached;
+                    }
+                }
+            }
+
+            int restoredCount = 0;
+            foreach (var question in questions)
+            {
+                int questionId = getQuestionId(question);
+                if (latestByQuestionId.TryGetValue(questionId, out var cached))
+                {
+                    setSelectedOption(question, cached.SelectedOption.Trim().ToUpperInvariant());
+                    restoredCount++;
+                }
+            }
+
+            return restoredCount;
+        }
+
+#if WINDOWS
+        public static int ApplyCachedAnswersToSession(CourseGuard.Backend.Models.StudentExamTakingModel? session)
+        {
+            if (session == null || session.AttemptId <= 0 || session.Questions.Count == 0)
+            {
+                return 0;
+            }
+
+            return ApplyCachedAnswersToSession(
+                session.AttemptId,
+                session.Questions,
+                q => q.Id,
+                (q, option) => q.SelectedOption = option);
+        }
+#endif
 
         private static byte[] Encrypt(byte[] data, int attemptId)
         {
@@ -829,6 +925,177 @@ namespace CourseGuard.Backend.Security
             {
                 return false;
             }
+        }
+    }
+}
+
+namespace CourseGuard.Backend.Services.Monitoring
+{
+    public readonly record struct ScreenStreamFrameData(
+        byte FrameType,
+        int ExamId,
+        int StudentId,
+        int AttemptId,
+        long UnixMillis,
+        byte[] JpegBytes);
+
+    /// <summary>
+    /// Reassembles fragmented WebSocket binary messages until <see cref="WebSocketReceiveResult.EndOfMessage"/>
+    /// with a strict size limit that includes the 30-byte protocol header, and parses complete frames.
+    /// </summary>
+    public static class ScreenStreamPacketAssembler
+    {
+        public const int HeaderLength = 30;
+        public const int MaxFrameBytes = 5 * 1024 * 1024;
+        public const int MaxPacketBytes = HeaderLength + MaxFrameBytes;
+        public const byte Version = 1;
+        private static readonly byte[] Magic = { (byte)'C', (byte)'G', (byte)'S', (byte)'F' };
+
+        public static byte[] BuildPacket(byte frameType, int examId, int studentId, int attemptId, long unixMillis, byte[] jpegBytes)
+        {
+            ArgumentNullException.ThrowIfNull(jpegBytes);
+            var packet = new byte[HeaderLength + jpegBytes.Length];
+            Magic.CopyTo(packet, 0);
+            packet[4] = Version;
+            packet[5] = frameType;
+            BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(6, 4), examId);
+            BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(10, 4), studentId);
+            BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(14, 4), attemptId);
+            BinaryPrimitives.WriteInt64BigEndian(packet.AsSpan(18, 8), unixMillis);
+            BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(26, 4), jpegBytes.Length);
+            Buffer.BlockCopy(jpegBytes, 0, packet, HeaderLength, jpegBytes.Length);
+            return packet;
+        }
+
+        public static bool TryReadHeader(
+            ReadOnlySpan<byte> header,
+            out byte frameType,
+            out int examId,
+            out int studentId,
+            out int attemptId,
+            out long unixMillis,
+            out int jpegLength)
+        {
+            frameType = 0;
+            examId = studentId = attemptId = jpegLength = 0;
+            unixMillis = 0;
+            if (header.Length < HeaderLength)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < Magic.Length; i++)
+            {
+                if (header[i] != Magic[i])
+                {
+                    return false;
+                }
+            }
+
+            if (header[4] != Version)
+            {
+                return false;
+            }
+
+            frameType = header[5];
+            examId = BinaryPrimitives.ReadInt32BigEndian(header.Slice(6, 4));
+            studentId = BinaryPrimitives.ReadInt32BigEndian(header.Slice(10, 4));
+            attemptId = BinaryPrimitives.ReadInt32BigEndian(header.Slice(14, 4));
+            unixMillis = BinaryPrimitives.ReadInt64BigEndian(header.Slice(18, 8));
+            jpegLength = BinaryPrimitives.ReadInt32BigEndian(header.Slice(26, 4));
+            return jpegLength > 0 && jpegLength <= MaxFrameBytes;
+        }
+
+        public static async Task<byte[]?> ReceiveBinaryMessageAsync(
+            WebSocket webSocket,
+            byte[] receiveBuffer,
+            CancellationToken cancellationToken,
+            int maxPacketBytes = MaxPacketBytes)
+        {
+            ArgumentNullException.ThrowIfNull(webSocket);
+            ArgumentNullException.ThrowIfNull(receiveBuffer);
+            if (receiveBuffer.Length == 0)
+            {
+                throw new ArgumentException("Receive buffer must not be empty.", nameof(receiveBuffer));
+            }
+            if (maxPacketBytes < HeaderLength)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxPacketBytes));
+            }
+
+            using var messageStream = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), cancellationToken).ConfigureAwait(false);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    return null;
+                }
+
+                if (result.MessageType != WebSocketMessageType.Binary)
+                {
+                    if (result.EndOfMessage)
+                    {
+                        return Array.Empty<byte>();
+                    }
+                    continue;
+                }
+
+                if (result.Count > 0)
+                {
+                    if (messageStream.Length + result.Count > maxPacketBytes)
+                    {
+                        throw new InvalidDataException($"Gói tin giám sát vượt quá giới hạn {maxPacketBytes} byte (bao gồm header 30 byte).");
+                    }
+
+                    messageStream.Write(receiveBuffer, 0, result.Count);
+                }
+            }
+            while (!result.EndOfMessage);
+
+            return messageStream.ToArray();
+        }
+
+        public static int TryParsePackets(byte[]? packet, int count, Action<ScreenStreamFrameData> onFrame)
+        {
+            ArgumentNullException.ThrowIfNull(onFrame);
+            if (packet == null || count < HeaderLength || count > MaxPacketBytes || count > packet.Length)
+            {
+                return 0;
+            }
+
+            int parsedCount = 0;
+            int offset = 0;
+            while (count - offset >= HeaderLength)
+            {
+                ReadOnlySpan<byte> headerSpan = packet.AsSpan(offset, HeaderLength);
+                if (!TryReadHeader(
+                    headerSpan,
+                    out byte frameType,
+                    out int examId,
+                    out int studentId,
+                    out int attemptId,
+                    out long unixMillis,
+                    out int jpegLength))
+                {
+                    break;
+                }
+
+                if (count - offset - HeaderLength < jpegLength)
+                {
+                    break;
+                }
+
+                var jpegBytes = new byte[jpegLength];
+                Buffer.BlockCopy(packet, offset + HeaderLength, jpegBytes, 0, jpegLength);
+                onFrame(new ScreenStreamFrameData(frameType, examId, studentId, attemptId, unixMillis, jpegBytes));
+                parsedCount++;
+                offset += HeaderLength + jpegLength;
+            }
+
+            return parsedCount;
         }
     }
 }

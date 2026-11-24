@@ -18,6 +18,7 @@ using CourseGuard.Frontend.UserControls.Student;
 using CourseGuard.Frontend.UserControls.Teacher;
 using System.Data;
 using System.Drawing;
+using System.Net.WebSockets;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -5791,6 +5792,7 @@ Run("student sidebar exposes chat unread badge", RunSidebarChatBadgeSourceTests)
 Run("student dashboard loads and reloads chat unread badge", RunStudentDashboardChatBadgeSourceTests);
 Run("course chat panel advances read watermark after refresh", RunStudentChatPageReadWatermarkSourceTests);
 Run("course management and security requirements", RunCourseManagementAndSecurityTests);
+Run("api monitor receiver reassembles fragmented websocket frames", RunApiMonitorReceiverFragmentationTestsAsync);
 TestRunner.PrintSummary();
 
 Console.WriteLine(Environment.ExitCode == 0 ? "Feature tests passed." : "Feature tests failed.");
@@ -5880,6 +5882,43 @@ static void RunCourseManagementAndSecurityTests()
     AssertTrue(cih.Contains("ResolveLocalFilePath"), "ChatImageHelper must support resolving local paths");
     AssertTrue(cil.Contains("ResolveLocalFilePath"), "ChatImageLoader must resolve image path");
     AssertTrue(cb.Contains("ResolveLocalFilePath"), "ChatBubbleControl must resolve preview image path");
+}
+
+static async Task RunApiMonitorReceiverFragmentationTestsAsync()
+{
+    byte[] sampleJpeg1 = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0xFF, 0xD9 };
+    byte[] sampleJpeg2 = new byte[] { 0xFF, 0xD8, 0x01, 0x02, 0x03, 0x04, 0xFF, 0xD9 };
+    byte[] packet1 = ScreenStreamPacketAssembler.BuildPacket(0, examId: 12, studentId: 201, attemptId: 901, unixMillis: 1700000001000L, sampleJpeg1);
+    byte[] packet2 = ScreenStreamPacketAssembler.BuildPacket(1, examId: 12, studentId: 202, attemptId: 902, unixMillis: 1700000002000L, sampleJpeg2);
+
+    var socket = new FakeApiMonitorWebSocket();
+    // Message 1: header split (20 bytes + 10 bytes) + JPEG payload
+    socket.EnqueueFragment(packet1[..20], endOfMessage: false);
+    socket.EnqueueFragment(packet1[20..30], endOfMessage: false);
+    socket.EnqueueFragment(packet1[30..], endOfMessage: true);
+    // Message 2: full header + partial JPEG, then remaining JPEG
+    socket.EnqueueFragment(packet2[..34], endOfMessage: false);
+    socket.EnqueueFragment(packet2[34..], endOfMessage: true);
+    socket.EnqueueClose();
+
+    using var receiver = new ApiMonitorReceiver();
+    var frames = new List<ScreenFrameReceivedEventArgs>();
+    receiver.FrameReceived += (_, args) => frames.Add(args);
+
+    await receiver.ReceiveMessagesAsync(socket, CancellationToken.None);
+
+    AssertEqual(2, frames.Count);
+    AssertEqual(12, frames[0].ExamId);
+    AssertEqual(201, frames[0].StudentId);
+    AssertEqual(901, frames[0].AttemptId);
+    AssertEqual((byte)0, frames[0].FrameType);
+    AssertTrue(frames[0].JpegBytes.SequenceEqual(sampleJpeg1), "First fragmented frame JPEG mismatch");
+
+    AssertEqual(12, frames[1].ExamId);
+    AssertEqual(202, frames[1].StudentId);
+    AssertEqual(902, frames[1].AttemptId);
+    AssertEqual((byte)1, frames[1].FrameType);
+    AssertTrue(frames[1].JpegBytes.SequenceEqual(sampleJpeg2), "Second fragmented frame JPEG mismatch");
 }
 
 static string RepoRoot()
@@ -8372,4 +8411,56 @@ sealed class TestTeacherGridPage : TeacherGridPageBase
             table.Rows.Add(id++, row);
         return table;
     }
+}
+
+sealed class FakeApiMonitorWebSocket : WebSocket
+{
+    private readonly Queue<(byte[] Bytes, WebSocketMessageType MessageType, bool EndOfMessage)> _frames = new();
+    private WebSocketState _state = WebSocketState.Open;
+
+    public void EnqueueFragment(byte[] bytes, bool endOfMessage, WebSocketMessageType messageType = WebSocketMessageType.Binary)
+        => _frames.Enqueue((bytes.ToArray(), messageType, endOfMessage));
+
+    public void EnqueueClose()
+        => _frames.Enqueue((Array.Empty<byte>(), WebSocketMessageType.Close, true));
+
+    public override WebSocketCloseStatus? CloseStatus => _state == WebSocketState.CloseReceived ? WebSocketCloseStatus.NormalClosure : null;
+    public override string? CloseStatusDescription => null;
+    public override WebSocketState State => _state;
+    public override string? SubProtocol => null;
+    public override void Abort() => _state = WebSocketState.Aborted;
+    public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+    {
+        _state = WebSocketState.Closed;
+        return Task.CompletedTask;
+    }
+    public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+    {
+        _state = WebSocketState.Closed;
+        return Task.CompletedTask;
+    }
+    public override void Dispose() => _state = WebSocketState.Closed;
+
+    public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_frames.Count == 0)
+        {
+            _state = WebSocketState.CloseReceived;
+            return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, WebSocketCloseStatus.NormalClosure, string.Empty));
+        }
+
+        var (bytes, messageType, endOfMessage) = _frames.Dequeue();
+        if (messageType == WebSocketMessageType.Close)
+        {
+            _state = WebSocketState.CloseReceived;
+            return Task.FromResult(new WebSocketReceiveResult(0, WebSocketMessageType.Close, true, WebSocketCloseStatus.NormalClosure, string.Empty));
+        }
+
+        Buffer.BlockCopy(bytes, 0, buffer.Array!, buffer.Offset, bytes.Length);
+        return Task.FromResult(new WebSocketReceiveResult(bytes.Length, messageType, endOfMessage));
+    }
+
+    public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+        => Task.CompletedTask;
 }
