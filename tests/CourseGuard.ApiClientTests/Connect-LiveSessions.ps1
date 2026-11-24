@@ -1,4 +1,4 @@
-param([string]$ApiBase='http://127.0.0.1:5087',[string]$SessionDirectory='.local/api-test-sessions')
+﻿param([string]$ApiBase='http://127.0.0.1:5087',[string]$SessionDirectory='.local/api-test-sessions')
 $ErrorActionPreference='Stop'
 $uri=[Uri]$ApiBase
 if($uri.Scheme -ne 'https' -and !$uri.IsLoopback){throw 'Dùng HTTPS khi kiểm thử từ xa.'}
