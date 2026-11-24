@@ -102,8 +102,10 @@ public static class ServerApiClient
         using var response = await Transport.Value.PostAsJsonAsync(path, value, ct).ConfigureAwait(false);
         await EnsureSuccess(response, ct).ConfigureAwait(false);
     }
-    private static Task EnsureSuccess(HttpResponseMessage response, CancellationToken ct)
+    private static async Task EnsureSuccess(HttpResponseMessage response, CancellationToken ct)
     {
+        if (response.StatusCode == HttpStatusCode.BadRequest && await ReadServerErrorAsync(response, ct).ConfigureAwait(false) is { } serverError)
+            throw new InvalidOperationException(serverError);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(response.StatusCode switch
             {
@@ -113,7 +115,19 @@ public static class ServerApiClient
                 HttpStatusCode.ServiceUnavailable => "Dịch vụ gửi OTP chưa sẵn sàng. Vui lòng thử lại.",
                 _ => $"Server không xử lý được yêu cầu (HTTP {(int)response.StatusCode})."
             });
-        return Task.CompletedTask;
+    }
+    // Validation endpoints answer 400 with {"error":"..."}; show that text instead of a bare status code.
+    private static async Task<string?> ReadServerErrorAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            if (response.Content.Headers.ContentType?.MediaType != "application/json") return null;
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(error.GetString()) ? error.GetString() : null;
+        }
+        catch (JsonException) { return null; }
     }
     public static async Task<LoginResultModel> LoginAsync(string username, string password, string? deviceName, CancellationToken ct)
     {

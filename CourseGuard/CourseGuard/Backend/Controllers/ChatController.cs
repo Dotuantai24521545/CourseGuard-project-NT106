@@ -624,7 +624,8 @@ namespace CourseGuard.Backend.Controllers
             }
 
             var fileInfo = new FileInfo(sourceFilePath);
-            const long maxSize = 20 * 1024 * 1024; // 20MB
+            // The API server stores chat files in PostgreSQL and accepts at most 5 MB (ChatUploadPolicy).
+            long maxSize = ServerApiClient.Enabled ? 5 * 1024 * 1024 : 20 * 1024 * 1024;
             if (fileInfo.Length <= 0)
             {
                 error = "File rỗng, không thể gửi.";
@@ -633,7 +634,7 @@ namespace CourseGuard.Backend.Controllers
 
             if (fileInfo.Length > maxSize)
             {
-                error = "File vuot qua gioi han 20MB.";
+                error = $"File vượt quá giới hạn {maxSize / (1024 * 1024)} MB.";
                 return false;
             }
 
@@ -641,7 +642,7 @@ namespace CourseGuard.Backend.Controllers
             string[] allowed = { ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".txt", ".zip", ".rar" };
             if (Array.IndexOf(allowed, ext) < 0)
             {
-                error = "Dinh dang file chua duoc ho tro.";
+                error = "Định dạng file chưa được hỗ trợ (cho phép: PDF, Word, Excel, PowerPoint, ảnh PNG/JPG, TXT, ZIP, RAR).";
                 return false;
             }
 
