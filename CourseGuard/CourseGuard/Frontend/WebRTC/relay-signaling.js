@@ -4,14 +4,20 @@
             this.config = config;
             this.log = logger ?? (() => { });
             this.handlers = new Set();
+            this.reconnectHandlers = new Set();
+            this.terminatedHandlers = new Set();
             this.seenSignalIds = new Set();
+            this.maxSeenSignalIds = 2000;
+            this.everConnected = false;
             this.joinedAt = options.joinedAt || new Date().toISOString();
             this.socket = null;
             this.started = false;
             this.manuallyStopped = false;
             this.reconnectAttempts = 0;
-            this.maxReconnectAttempts = 3;
-            this.reconnectDelayMs = 2000;
+            // Backoff 1s, 2s, 4s, 8s, then every 10s: covers a Wi-Fi switch or a short server restart.
+            this.maxReconnectAttempts = 8;
+            this.reconnectDelayMs = 1000;
+            this.maxReconnectDelayMs = 10000;
             this.pendingMessages = [];
         }
 
@@ -33,6 +39,8 @@
             this.started = false;
             this.pendingMessages.length = 0;
             this.handlers.clear();
+            this.reconnectHandlers.clear();
+            this.terminatedHandlers.clear();
             this.seenSignalIds.clear();
 
             if (!this.socket) {
@@ -49,6 +57,18 @@
         onSignal(handler) {
             this.handlers.add(handler);
             return () => this.handlers.delete(handler);
+        }
+
+        /** Called after the socket comes back; peers may have dropped us meanwhile, so re-announce. */
+        onReconnected(handler) {
+            this.reconnectHandlers.add(handler);
+            return () => this.reconnectHandlers.delete(handler);
+        }
+
+        /** Called when the connection ends for good (room closed, replaced, retries exhausted). */
+        onTerminated(handler) {
+            this.terminatedHandlers.add(handler);
+            return () => this.terminatedHandlers.delete(handler);
         }
 
         async send(type, payload = {}, receiverId = null) {
@@ -71,8 +91,12 @@
                 return;
             }
 
+            if (this.manuallyStopped) {
+                return;
+            }
             this.pendingMessages.push(message);
-            if (!this.socket || this.socket.readyState === WebSocket.CLOSED) {
+            // While a reconnect is scheduled, queue only: a second parallel connect would open a duplicate socket.
+            if (this.reconnectAttempts === 0 && (!this.socket || this.socket.readyState === WebSocket.CLOSED)) {
                 await this.#connect();
             }
         }
@@ -84,7 +108,7 @@
                 this.socket = socket;
 
                 const timeoutId = window.setTimeout(() => {
-                    reject(new Error("Railway Classroom Relay không phản hồi khi kết nối."));
+                    reject(new Error("Máy chủ lớp học không phản hồi khi kết nối."));
                     try {
                         socket.close();
                     } catch {
@@ -93,10 +117,20 @@
 
                 socket.onopen = () => {
                     window.clearTimeout(timeoutId);
+                    if (this.socket !== socket) {
+                        return;
+                    }
+                    const isReconnect = this.everConnected;
+                    this.everConnected = true;
                     this.started = true;
                     this.reconnectAttempts = 0;
-                    this.log("Đã kết nối Railway Classroom Relay.");
+                    this.log(isReconnect ? "Đã kết nối lại máy chủ lớp học." : "Đã kết nối máy chủ lớp học.");
                     this.#flushPendingMessages();
+                    if (isReconnect) {
+                        for (const handler of this.reconnectHandlers) {
+                            void handler();
+                        }
+                    }
                     resolve();
                 };
 
@@ -105,15 +139,33 @@
                 };
 
                 socket.onerror = () => {
-                    this.log("Railway Classroom Relay báo lỗi WebSocket.");
+                    this.log("Kết nối WebSocket tới máy chủ lớp học bị lỗi.");
                 };
 
-                socket.onclose = () => {
+                socket.onclose = (event) => {
                     window.clearTimeout(timeoutId);
-                    this.started = false;
-                    if (!this.manuallyStopped) {
-                        void this.#scheduleReconnect();
+                    // A stale socket closing after a newer one opened must not start another reconnect loop.
+                    if (this.socket !== socket) {
+                        return;
                     }
+                    const wasOpen = this.started;
+                    this.started = false;
+                    if (this.manuallyStopped) {
+                        return;
+                    }
+                    const terminal = CourseGuardRelaySignaling.terminalCloseReason(event?.code);
+                    if (terminal) {
+                        this.manuallyStopped = true;
+                        this.#notifyTerminated(event.code, terminal);
+                        reject(new Error(terminal));
+                        return;
+                    }
+                    if (!wasOpen) {
+                        // Never opened: let the caller (start or #scheduleReconnect) decide what to do.
+                        reject(new Error("Không kết nối được máy chủ lớp học."));
+                        return;
+                    }
+                    void this.#scheduleReconnect();
                 };
             });
         }
@@ -138,7 +190,7 @@
             }
             const rawUrl = String(this.config.relayWsUrl || "").trim();
             if (!rawUrl) {
-                throw new Error("Thiếu RELAY_WS_URL cho Railway Classroom Relay.");
+                throw new Error("Thiếu RELAY_WS_URL cho relay lớp học (chế độ cũ).");
             }
 
             const baseUrl = rawUrl.endsWith("/relay")
@@ -153,14 +205,18 @@
 
         async #scheduleReconnect() {
             if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-                this.log("Railway Classroom Relay đã ngắt kết nối sau 3 lần thử lại.");
+                const reason = `Mất kết nối máy chủ lớp học sau ${this.maxReconnectAttempts} lần thử lại.`;
+                this.log(reason);
+                this.manuallyStopped = true;
+                this.#notifyTerminated(0, reason);
                 return;
             }
 
             this.reconnectAttempts += 1;
             const attempt = this.reconnectAttempts;
-            this.log(`Đang kết nối lại Railway Classroom Relay (${attempt}/${this.maxReconnectAttempts})...`);
-            await new Promise((resolve) => window.setTimeout(resolve, this.reconnectDelayMs));
+            const delay = Math.min(this.reconnectDelayMs * 2 ** (attempt - 1), this.maxReconnectDelayMs);
+            this.log(`Đang kết nối lại máy chủ lớp học (${attempt}/${this.maxReconnectAttempts})...`);
+            await new Promise((resolve) => window.setTimeout(resolve, delay));
 
             if (this.manuallyStopped) {
                 return;
@@ -169,7 +225,32 @@
             try {
                 await this.#connect();
             } catch (error) {
-                this.log(`Kết nối lại Railway Classroom Relay thất bại: ${error?.message || error}`);
+                this.log(`Kết nối lại máy chủ lớp học thất bại: ${error?.message || error}`);
+                // A refused ticket or a socket that never opened does not reach the "was open" branch of
+                // onclose, so the retry loop continues from here.
+                if (!this.manuallyStopped && !this.started) {
+                    void this.#scheduleReconnect();
+                }
+            }
+        }
+
+        #notifyTerminated(code, reason) {
+            for (const handler of this.terminatedHandlers) {
+                void handler({ code, reason });
+            }
+        }
+
+        /** Close codes sent by CourseGuard.Server ClassroomApi: reconnecting would be refused or would kick the other window. */
+        static terminalCloseReason(code) {
+            switch (code) {
+                case 4000:
+                    return "Tài khoản này đã vào lớp học ở một cửa sổ khác.";
+                case 4001:
+                    return "Giáo viên đã đóng lớp học.";
+                case 1008:
+                    return "Lớp học đã đủ số kết nối tối đa.";
+                default:
+                    return null;
             }
         }
 
@@ -207,6 +288,10 @@
                 return;
             }
             this.seenSignalIds.add(signalId);
+            if (this.seenSignalIds.size > this.maxSeenSignalIds) {
+                // Sets iterate in insertion order: drop the oldest id so a 2-hour class does not grow forever.
+                this.seenSignalIds.delete(this.seenSignalIds.values().next().value);
+            }
 
             if (String(row.sender_id) === this.senderId) {
                 return;
