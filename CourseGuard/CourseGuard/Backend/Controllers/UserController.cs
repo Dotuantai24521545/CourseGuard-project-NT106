@@ -21,15 +21,25 @@ namespace CourseGuard.Backend.Controllers
         // Placeholder methods to replace the former IUserService
         public List<UserModel> SearchUsers(string username, string fullName, string email, string status, string role)
         {
-            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<UserModel>>($"api/admin/users?status={Uri.EscapeDataString(status)}&role={Uri.EscapeDataString(role)}").GetAwaiter().GetResult();
-            if (!UserSessionContext.IsAdmin())
+            List<UserModel> users;
+            if (ServerApiClient.Enabled)
             {
-                LastErrorMessage = "Bạn không có quyền truy cập danh sách người dùng.";
-                return new List<UserModel>();
+                string safeStatus = string.IsNullOrWhiteSpace(status) ? "ALL" : status;
+                string safeRole = string.IsNullOrWhiteSpace(role) ? "ALL" : role;
+                users = ServerApiClient.GetAsync<List<UserModel>>(
+                    $"api/admin/users?status={Uri.EscapeDataString(safeStatus)}&role={Uri.EscapeDataString(safeRole)}")
+                    .GetAwaiter().GetResult() ?? new List<UserModel>();
             }
+            else
+            {
+                if (!UserSessionContext.IsAdmin())
+                {
+                    LastErrorMessage = "Bạn không có quyền truy cập danh sách người dùng.";
+                    return new List<UserModel>();
+                }
 
-            var users = _dbContext.SearchUsers(status, role);
-
+                users = _dbContext.SearchUsers(status, role);
+            }
             if (!string.IsNullOrWhiteSpace(username))
             {
                 string searchUsername = username.ToLower();

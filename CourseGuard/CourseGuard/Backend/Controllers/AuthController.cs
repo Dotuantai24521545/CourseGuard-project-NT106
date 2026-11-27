@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using CourseGuard.Backend.Data;
@@ -138,7 +140,21 @@ namespace CourseGuard.Backend.Controllers
         public async Task<LoginResultModel> LoginAsync(string username, string password, string? deviceName = null, CancellationToken cancellationToken = default)
         {
             if (ServerApiClient.Enabled)
-                return await ServerApiClient.LoginAsync(username, password, deviceName, cancellationToken);
+            {
+                LastErrorMessage = string.Empty;
+                try
+                {
+                    return await ServerApiClient.LoginAsync(username, password, deviceName, cancellationToken);
+                }
+                catch (InvalidOperationException ex) when (
+                    ex.Message.Contains("Dịch vụ gửi OTP", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("Không gửi được OTP", StringComparison.OrdinalIgnoreCase))
+                {
+                    LastErrorMessage = "Lỗi gửi mail OTP";
+                    return LoginResultModel.Failed();
+                }
+            }
+
             if (!UserIdentityBloomIndex.UsernameExists(_dbContext, username))
             {
                 return LoginResultModel.Failed();
@@ -192,7 +208,7 @@ namespace CourseGuard.Backend.Controllers
             _dbContext.SaveMfaOtp(user.Id, otp, expiresAt);
 
             // 2. Send Email
-            string emailBody = 
+            string emailBody =
                 $"Xin chao {user.FullName ?? user.Username},\n\n" +
                 $"Ma OTP xac thuc 2 lop de dang nhap vao CourseGuard cua ban la: {otp}\n" +
                 $"Ma co hieu luc trong {otpExpiryMinutes} phut (den luc: {expiresAt:dd/MM/yyyy HH:mm}).\n\n" +
@@ -301,7 +317,7 @@ namespace CourseGuard.Backend.Controllers
             {
                 Console.WriteLine("User registration failed: Username already exists.");
                 LastErrorMessage = "Tên đăng nhập đã tồn tại trong hệ thống.";
-                return false; 
+                return false;
             }
             if (UserIdentityBloomIndex.EmailExists(_dbContext, user.Email))
             {
@@ -311,7 +327,7 @@ namespace CourseGuard.Backend.Controllers
 
             // Hash password
             string passwordHash = PasswordHasher.HashPassword(password);
-            
+
             // Set default status and role as requested
             user.Status = "PENDING";
             user.Role = "STUDENT";
@@ -354,7 +370,7 @@ namespace CourseGuard.Backend.Controllers
                 _dbContext.UpdateUserStatus(user.Id, "RESET_REQUEST");
                 _dbContext.LogUserActivity(user.Id, "FORGOT_PASSWORD", $"Yêu cầu quên mật khẩu: {user.Username}", string.Empty);
             }
-            
+
             // Always return true to prevent user enumeration
             return true;
         }
