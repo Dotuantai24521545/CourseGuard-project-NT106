@@ -160,7 +160,6 @@ namespace CourseGuard.Frontend.Forms.Login
             LOGO.TabIndex = 1;
             LOGO.Text = "COURSE GUARD";
             LOGO.TextAlign = ContentAlignment.MiddleCenter;
-            LOGO.Click += LOGO_Click;
             // 
             // lblUsername
             // 
@@ -299,7 +298,6 @@ namespace CourseGuard.Frontend.Forms.Login
             Name = "LoginPage";
             StartPosition = FormStartPosition.CenterScreen;
             Text = "Course Guard - Auth";
-            Load += LoginPage_Load_1;
             LoginPanel.ResumeLayout(false);
             LoginPanel.PerformLayout();
             RegisterPanel.ResumeLayout(false);

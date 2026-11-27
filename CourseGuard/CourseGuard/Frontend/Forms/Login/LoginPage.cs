@@ -82,6 +82,7 @@ namespace CourseGuard.Frontend.Forms.Login
         public LoginPage()
         {
             InitializeComponent();
+
             CustomizeUI(); // Apply modern UI styles
 
             this.Load += LoginPage_Load;
@@ -870,8 +871,30 @@ namespace CourseGuard.Frontend.Forms.Login
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 LogLoginTiming("start login", stopwatch);
 
-                LoginResultModel loginResult = await Task.Run(() => AuthService.LoginAsync(username, password, Environment.MachineName));
-                LogLoginTiming("auth response", stopwatch);
+                LoginResultModel loginResult;
+                while (true)
+                {
+                    loginResult = await Task.Run(() => AuthService.LoginAsync(username, password, Environment.MachineName));
+                    LogLoginTiming("auth response", stopwatch);
+
+                    if (loginResult.User == null && AuthService.LastErrorMessage == "Lỗi gửi mail OTP")
+                    {
+                        DialogResult retryResult = MessageBox.Show(
+                            this,
+                            "Lỗi mạng hoặc sai mật khẩu mail",
+                            "Lỗi gửi",
+                            MessageBoxButtons.RetryCancel,
+                            MessageBoxIcon.Error);
+
+                        if (retryResult == DialogResult.Retry)
+                        {
+                            continue;
+                        }
+                        return;
+                    }
+
+                    break;
+                }
 
                 if (loginResult.ErrorCode == LoginErrorCodes.DeviceBlocked)
                 {
@@ -914,7 +937,7 @@ namespace CourseGuard.Frontend.Forms.Login
                 {
                     using (var otpDialog = new MfaOtpDialog(user.Id, AuthService))
                     {
-                        if (otpDialog.ShowDialog() != DialogResult.OK)
+                        if (otpDialog.ShowDialog(this) != DialogResult.OK)
                         {
                             return;
                         }
@@ -976,7 +999,6 @@ namespace CourseGuard.Frontend.Forms.Login
                 SetLoginUiBusy(false);
             }
         }
-
         private Task<string> GetLocalIPAddressAsync()
         {
             return Task.Run(() =>
@@ -1029,16 +1051,6 @@ namespace CourseGuard.Frontend.Forms.Login
         private static void LogLoginTiming(string stage, Stopwatch stopwatch)
         {
             Debug.WriteLine($"[LOGIN_PERF] {stage}: {stopwatch.ElapsedMilliseconds} ms");
-        }
-
-        private void LOGO_Click(object sender, EventArgs e)
-        {
-
-        }
-
-        private void LoginPage_Load_1(object sender, EventArgs e)
-        {
-
         }
 
         public UserModel? CurrentUser { get; private set; }

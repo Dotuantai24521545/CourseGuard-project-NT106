@@ -5,14 +5,15 @@
  * Vai trò: Màn hình quản lý người dùng (CRUD). Hiển thị danh sách, thêm/xóa/sửa user.
  * Phụ thuộc: UserService.
  */
-using System;
-using System.Data; // Keep for rare cases, but mostly replaced
-using System.Windows.Forms;
+using CourseGuard.Backend.Controllers;
+using CourseGuard.Backend.Data;
 // Remove SqlClient
 using CourseGuard.Backend.Models;
 using CourseGuard.Backend.Security;
-using CourseGuard.Backend.Data;
 using CourseGuard.Frontend.Theme;
+using System;
+using System.Data; // Keep for rare cases, but mostly replaced
+using System.Windows.Forms;
 
 namespace CourseGuard.Frontend.UserControls.Admin
 {
@@ -170,16 +171,21 @@ namespace CourseGuard.Frontend.UserControls.Admin
 
         private async void LoadData()
         {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new MethodInvoker(LoadData));
+                return;
+            }
             string status = cb_StatusFilter.SelectedItem?.ToString() ?? "ALL";
             string role = (cb_roleID.SelectedItem == null || cb_roleID.Text == "Select Role") ? "ALL" : cb_roleID.Text.ToUpper();
 
             this.ShowSkeleton(SkeletonType.FormWithTable);
             try
             {
-                var users = await Task.Run(() => _userService.SearchUsers(status, role));
-                dataGridView1.DataSource = users;
-                
-                // Hide Password Hash if present in grid?
+                var list = _userService.SearchUsers(txt_Username.Text.Trim(), txt_FullName.Text.Trim(), txt_Email.Text.Trim(), status, role);
+
+                dataGridView1.DataSource = list;
+
                 if (dataGridView1.Columns.Contains("PasswordHash"))
                 {
                     DataGridViewColumn? passwordColumn = dataGridView1.Columns["PasswordHash"];
