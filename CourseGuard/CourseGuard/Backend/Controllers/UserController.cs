@@ -21,6 +21,7 @@ namespace CourseGuard.Backend.Controllers
         // Placeholder methods to replace the former IUserService
         public List<UserModel> SearchUsers(string username, string fullName, string email, string status, string role)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<UserModel>>($"api/admin/users?status={Uri.EscapeDataString(status)}&role={Uri.EscapeDataString(role)}").GetAwaiter().GetResult();
             if (!UserSessionContext.IsAdmin())
             {
                 LastErrorMessage = "Bạn không có quyền truy cập danh sách người dùng.";
@@ -52,6 +53,7 @@ namespace CourseGuard.Backend.Controllers
 
         public List<UserModel> GetByRole(string role)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<UserModel>>($"api/admin/users/by-role/{Uri.EscapeDataString(role)}").GetAwaiter().GetResult();
             if (!UserSessionContext.IsAdmin())
             {
                 LastErrorMessage = "Bạn không có quyền xem dữ liệu theo vai trò.";
@@ -68,6 +70,7 @@ namespace CourseGuard.Backend.Controllers
 
         public string AddUser(UserModel user, string password)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<string>("api/admin/users", new { user.Username, user.FullName, user.Email, user.Role, Status = string.IsNullOrWhiteSpace(user.Status) ? "ACTIVE" : user.Status, password }).GetAwaiter().GetResult();
             LastErrorMessage = string.Empty;
             if (!UserSessionContext.IsAdmin())
             {
@@ -125,6 +128,7 @@ namespace CourseGuard.Backend.Controllers
 
         public bool DeleteUser(int userId)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>($"api/admin/users/{userId}/delete", new { }).GetAwaiter().GetResult();
             LastErrorMessage = string.Empty;
             if (!UserSessionContext.IsAdmin())
             {
@@ -154,6 +158,7 @@ namespace CourseGuard.Backend.Controllers
 
         public List<UserModel> GetPendingRequests()
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.GetAsync<List<UserModel>>("api/admin/users/pending").GetAwaiter().GetResult();
             // Lấy danh sách user có status là PENDING hoặc RESET_REQUEST
             return _dbContext.GetUsersByStatus("PENDING", "RESET_REQUEST");
         }
@@ -170,6 +175,11 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ApproveUserRequest(int userId, string action)
         {
+            if (ServerApiClient.Enabled)
+            {
+                if (action == "RESET") return ServerApiClient.PostAsync<bool>($"api/admin/users/{userId}/reset-request", new { }).GetAwaiter().GetResult();
+                return ServerApiClient.PostAsync<bool>($"api/admin/users/{userId}/status", new { action }).GetAwaiter().GetResult();
+            }
             LastErrorMessage = string.Empty;
             if (!UserSessionContext.IsAdmin())
             {
@@ -231,6 +241,7 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ApproveRegistration(int userId)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>($"api/admin/users/{userId}/status", new { action = "APPROVE" }).GetAwaiter().GetResult();
             if (!UserSessionContext.IsAdmin())
             {
                 LastErrorMessage = "Bạn không có quyền kích hoạt tài khoản.";
@@ -251,6 +262,7 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ResetUserPassword(int userId, string newPassword)
         {
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>($"api/admin/users/{userId}/password", new { password = newPassword }).GetAwaiter().GetResult();
             if (!UserSessionContext.IsAdmin())
             {
                 LastErrorMessage = "Bạn không có quyền đặt lại mật khẩu.";

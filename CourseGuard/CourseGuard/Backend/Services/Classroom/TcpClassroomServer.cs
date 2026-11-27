@@ -77,7 +77,8 @@ namespace CourseGuard.Backend.Services.Classroom
                         _ws = new ClientWebSocket();
 
                         StatusChanged?.Invoke(this, new ClassroomStatusEventArgs("Đang kết nối tới Cloud Classroom Relay..."));
-                        await _ws.ConnectAsync(new Uri(connectionUrl), token);
+                        if(CourseGuard.Backend.Services.ServerApiClient.Enabled)await CourseGuard.Backend.Services.ServerApiClient.ConnectClassroomAsync(_ws,sessionId,token);
+                        else await _ws.ConnectAsync(new Uri(connectionUrl), token);
                         StatusChanged?.Invoke(this, new ClassroomStatusEventArgs("Đã kết nối tới Cloud Classroom Relay."));
 
                         await ReceiveLoopAsync(token);

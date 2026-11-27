@@ -34,7 +34,7 @@ namespace CourseGuard.Frontend.Forms.Student
         private bool _isShowingSubmitConfirmation;
         private Label _progressLabel = null!;
         private Label _saveStatusLabel = null!;
-        
+
         // Resilience & Offline Recovery Fields
         private int _syncCounter;
         private bool _isSyncingCache;
@@ -56,7 +56,7 @@ namespace CourseGuard.Frontend.Forms.Student
             ApplyAcademicExamTheme();
             WireEvents();
             RoundedButtonHelper.Apply(10, btnSubmit, btnPrev, btnNext);
-            
+
             this.WindowState = FormWindowState.Maximized;
             this.TopMost = true;
             this.MinimizeBox = false;
@@ -160,7 +160,7 @@ namespace CourseGuard.Frontend.Forms.Student
             btnSubmit.Click += (_, _) => SubmitExam(confirm: true);
             btnPrev.Click += (_, _) => MoveQuestion(-1);
             btnNext.Click += (_, _) => MoveQuestion(1);
-            chkMark.CheckedChanged += (_, _) => 
+            chkMark.CheckedChanged += (_, _) =>
             {
                 if (_session != null && !_loadingQuestion)
                 {
@@ -177,6 +177,7 @@ namespace CourseGuard.Frontend.Forms.Student
             _timer.Tick += (_, _) => UpdateTimerText();
             _antiCheatTimer.Interval = 1000;
             _antiCheatTimer.Tick += AntiCheatTimer_Tick;
+            _antiCheatTimer.Start();
         }
 
         private void LoadExamSession()
@@ -538,23 +539,48 @@ namespace CourseGuard.Frontend.Forms.Student
                 return;
 
             StudentExamTakingQuestionModel question = _session.Questions[_currentIndex];
+            int studentId = UserSessionContext.CurrentUserId ?? 0;
             bool saved = false;
             try
             {
-                saved = _dbContext.SaveStudentExamAnswer(UserSessionContext.CurrentUserId ?? 0, _session.AttemptId, question.Id, option);
+                saved = LocalAnswerCache.SaveOnlineAnswer(
+                    studentId,
+                    _session.AttemptId,
+                    question.Id,
+                    option,
+                    () => _dbContext.SaveStudentExamAnswer(studentId, _session.AttemptId, question.Id, option));
             }
             catch (Exception)
             {
+                if (LocalAnswerCache.SaveAnswer(studentId, _session.AttemptId, question.Id, option))
+                {
+                    question.SelectedOption = option;
+                    UpdateQuestionButtons();
+                    UpdateProgressSummary();
+                    UpdateSaveStatus(false, offline: true);
+                    return;
+                }
+
                 UpdateSaveStatus(false);
                 return;
             }
 
             if (saved)
             {
+                LocalAnswerCache.RecordOnlineAnswerSaved(studentId, _session.AttemptId, question.Id, option);
                 question.SelectedOption = option;
                 UpdateQuestionButtons();
                 UpdateProgressSummary();
                 UpdateSaveStatus(true);
+                return;
+            }
+
+            if (LocalAnswerCache.SaveAnswer(studentId, _session.AttemptId, question.Id, option))
+            {
+                question.SelectedOption = option;
+                UpdateQuestionButtons();
+                UpdateProgressSummary();
+                UpdateSaveStatus(false, offline: true);
                 return;
             }
 
@@ -689,7 +715,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
                 var question = _session.Questions[i];
                 bool answered = !string.IsNullOrWhiteSpace(question.SelectedOption);
-                
+
                 if (i == _currentIndex)
                 {
                     button.BackColor = AcademicTheme.Primary;
@@ -739,7 +765,7 @@ namespace CourseGuard.Frontend.Forms.Student
 
             LowLevelKeyboardHook.Unhook();
             LowLevelKeyboardHook.OnCheatKeyPressed -= LowLevelKeyboardHook_OnCheatKeyPressed;
-            
+
             _timer.Stop();
             _antiCheatTimer.Stop();
             _monitoringCts.Cancel();
@@ -777,41 +803,20 @@ namespace CourseGuard.Frontend.Forms.Student
             if (_session == null || _isSyncingCache)
                 return;
 
-            var cachedAnswers = LocalAnswerCache.LoadAll(_session.AttemptId);
-            if (cachedAnswers.Count == 0)
+            int attemptId = _session.AttemptId;
+            if (LocalAnswerCache.LoadAll(attemptId).Count == 0)
                 return;
 
             _isSyncingCache = true;
             try
             {
-                foreach (var cached in cachedAnswers.ToList())
-                {
-                    bool synced = await System.Threading.Tasks.Task.Run(() =>
-                    {
-                        try
-                        {
-                            return _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption);
-                        }
-                        catch
-                        {
-                            return false;
-                        }
-                    });
+                bool allSynced = await LocalAnswerCache.SyncPendingAnswersAsync(
+                    attemptId,
+                    cached => System.Threading.Tasks.Task.Run(() =>
+                        _dbContext.SaveStudentExamAnswer(cached.StudentId, cached.AttemptId, cached.QuestionId, cached.SelectedOption)));
 
-                    if (synced)
-                    {
-                        cachedAnswers.Remove(cached);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if (cachedAnswers.Count == 0)
+                if (allSynced)
                 {
-                    LocalAnswerCache.Clear(_session.AttemptId);
-                    
                     void ResetSaveStatusSuccess()
                     {
                         if (_saveStatusLabel != null && !_saveStatusLabel.IsDisposed)
@@ -821,14 +826,12 @@ namespace CourseGuard.Frontend.Forms.Student
                         }
                     }
 
+                    if (IsDisposed)
+                        return;
                     if (InvokeRequired)
                         BeginInvoke(new MethodInvoker(ResetSaveStatusSuccess));
                     else
                         ResetSaveStatusSuccess();
-                }
-                else
-                {
-                    LocalAnswerCache.SaveAll(_session.AttemptId, cachedAnswers);
                 }
             }
             finally
@@ -854,7 +857,7 @@ namespace CourseGuard.Frontend.Forms.Student
             };
             innerContainer.Left = (this.ClientSize.Width - innerContainer.Width) / 2;
             innerContainer.Top = (this.ClientSize.Height - innerContainer.Height) / 2;
-            
+
             this.Resize += (s, e) =>
             {
                 if (_pnlLock != null && innerContainer != null && !innerContainer.IsDisposed)
@@ -959,7 +962,7 @@ namespace CourseGuard.Frontend.Forms.Student
             if (OtpRecoveryService.VerifyOtp(studentId, _session.AttemptId, otp))
             {
                 _connectionLostViolationRecorded = false;
-                
+
                 if (_pnlLock != null)
                 {
                     _pnlLock.Visible = false;
@@ -991,7 +994,7 @@ namespace CourseGuard.Frontend.Forms.Student
             try
             {
                 int studentId = UserSessionContext.CurrentUserId ?? 0;
-                
+
                 var studentUser = await System.Threading.Tasks.Task.Run(() => _dbContext.GetUserById(studentId));
                 if (studentUser == null || string.IsNullOrWhiteSpace(studentUser.Email))
                 {

@@ -12,6 +12,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
     {
         private readonly FlowLayoutPanel _flowLayoutPanel = new();
         private readonly ConcurrentDictionary<int, StudentMonitorCard> _studentCards = new();
+        private ApiMonitorReceiver? _apiReceiver;
 
         public MonitorAllForm()
         {
@@ -27,23 +28,30 @@ namespace CourseGuard.Frontend.Forms.Teacher
             _flowLayoutPanel.BackColor = MetaTheme.Colors.FormBg;
             Controls.Add(_flowLayoutPanel);
 
-            TcpScreenMonitorService.Instance.FrameReceived += Service_FrameReceived;
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled)
+            {
+                _apiReceiver=new();_apiReceiver.FrameReceived+=Service_FrameReceived;
+            }
+            else TcpScreenMonitorService.Instance.FrameReceived += Service_FrameReceived;
             FormClosing += MonitorAllForm_FormClosing;
         }
 
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            TcpScreenMonitorService.Instance.StartListening();
+            if(_apiReceiver is not null)_= _apiReceiver.RunAsync();
+            else TcpScreenMonitorService.Instance.StartListening();
         }
 
         private void MonitorAllForm_FormClosing(object? sender, FormClosingEventArgs e)
         {
+            if(_apiReceiver is not null){_apiReceiver.FrameReceived-=Service_FrameReceived;_apiReceiver.Dispose();}
             TcpScreenMonitorService.Instance.FrameReceived -= Service_FrameReceived;
             foreach (var card in _studentCards.Values)
             {
                 card.DisposeImage();
             }
+            TcpScreenMonitorService.Instance.Dispose();
         }
 
         private void Service_FrameReceived(object? sender, ScreenFrameReceivedEventArgs e)
@@ -95,7 +103,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 _studentId = studentId;
                 _examId = examId;
                 _attemptId = attemptId;
-                
+
                 Width = 240;
                 Height = 180;
                 Margin = new Padding(10);
@@ -109,7 +117,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                     BackColor = Color.Black,
                     Cursor = Cursors.Hand
                 };
-                _pictureBox.Click += (_, _) => 
+                _pictureBox.Click += (_, _) =>
                 {
                     var popup = new MonitorPopupForm(0, _examId, _studentId, _attemptId);
                     popup.Show(parentForm);
@@ -135,7 +143,7 @@ namespace CourseGuard.Frontend.Forms.Teacher
                 Image? old = _pictureBox.Image;
                 _pictureBox.Image = frame;
                 old?.Dispose();
-                
+
                 _pictureBox.Refresh(); // Force redraw
 
                 if (frameType == 1) // Cheating detected

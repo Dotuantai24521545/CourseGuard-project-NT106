@@ -92,6 +92,9 @@ namespace CourseGuard.Backend.Services
 
         public async Task<List<AiGeneratedQuestion>> GenerateQuestionsAsync(string topicContent, int easyCount, int mediumCount, int hardCount)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<List<AiGeneratedQuestion>>("api/ai/questions", new { topicContent, easyCount, mediumCount, hardCount });
+#endif
             if (string.IsNullOrWhiteSpace(topicContent)) return new List<AiGeneratedQuestion>();
 
             string systemPrompt = "Bạn là chuyên gia giáo dục biên soạn câu hỏi trắc nghiệm tiếng Việt. Trả về định dạng JSON thuần túy danh sách các câu hỏi trong đó mỗi câu có content, level (EASY/MEDIUM/HARD), optionA, optionB, optionC, optionD, correctOption (A/B/C/D), explanation.";
@@ -111,6 +114,9 @@ namespace CourseGuard.Backend.Services
         // ✍️ 1. AI Chấm bài Tự luận (AI Essay Grading)
         public async Task<AiEssayGradeResult> GradeEssayAsync(string questionText, string sampleAnswer, string studentSubmission, decimal maxPoints)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<AiEssayGradeResult>("api/ai/grade", new { questionText, sampleAnswer, studentSubmission, maxPoints });
+#endif
             if (maxPoints <= 0) throw new ArgumentOutOfRangeException(nameof(maxPoints));
             string systemPrompt = "Bạn là trợ lý chấm thi tự luận chuyên nghiệp. Hãy so sánh bài làm của sinh viên với đáp án mẫu và chấm điểm chính xác. Trả về JSON thuần túy có thuộc tính suggestedScore (số), feedback (chuỗi), strengths (chuỗi), improvements (chuỗi).";
             string userPrompt = "Đề bài: " + questionText + "\nĐáp án mẫu: " + sampleAnswer + "\nBài nộp sinh viên: " + studentSubmission + "\nĐiểm tối đa: " + maxPoints;
@@ -127,6 +133,9 @@ namespace CourseGuard.Backend.Services
         // 🤖 2. Trợ lý Học tập 24/7 (Virtual Course Tutor)
         public async Task<string> AskVirtualTutorAsync(string courseName, string lectureContext, string studentQuestion)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<string>("api/ai/tutor", new { courseName, lectureContext, studentQuestion });
+#endif
             string systemPrompt = "Bạn là Trợ lý Học tập AI 24/7 môn " + courseName + ". Hãy giải đáp thắc mắc của sinh viên một cách dễ hiểu, tận tâm và bám sát kiến thức giáo trình.";
             string userPrompt = "Tài liệu tham khảo môn học:\n" + lectureContext + "\n\nCâu hỏi sinh viên: " + studentQuestion;
 
@@ -137,6 +146,9 @@ namespace CourseGuard.Backend.Services
         // 🃏 3. Tự động Tạo Thẻ Ôn tập (AI Flashcards Generator)
         public async Task<List<AiFlashcard>> GenerateFlashcardsAsync(string lectureContent, int count = 5)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<List<AiFlashcard>>("api/ai/flashcards", new { lectureContent, count });
+#endif
             string systemPrompt = "Bạn là chuyên gia tổng hợp kiến thức. Hãy trích xuất các thuật ngữ và định nghĩa quan trọng nhất từ bài giảng thành bộ thẻ ghi nhớ (Flashcards). Trả về JSON thuần túy danh sách các thẻ có thuộc tính term và definition.";
             string userPrompt = "Tài liệu bài giảng:\n" + lectureContent + "\n\nHãy tạo " + count + " thẻ flashcard.";
 

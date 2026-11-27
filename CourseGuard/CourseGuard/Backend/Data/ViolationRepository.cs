@@ -4,18 +4,29 @@ using System.Threading.Tasks;
 using CourseGuard.Backend.Config;
 using CourseGuard.Backend.Models;
 using Npgsql;
+using CourseGuard.Backend.Services;
 
 namespace CourseGuard.Backend.Data
 {
     public class ViolationRepository
     {
-        private readonly string _connectionString = AppEnvironment.GetRequired(
+        private readonly string _connectionString = GetConnectionString();
+        private static string GetConnectionString()
+        {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return "";
+#endif
+            return AppEnvironment.GetRequired(
             "COURSEGUARD_DB_CONNECTION",
             "SUPABASE_DB_CONNECTION",
             "CONNECTION_STRING");
+        }
 
         public async Task<int> InsertViolationAsync(ViolationModel violation)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.PostAsync<int>("api/monitor/violations", violation);
+#endif
             const string sql = @"
                 INSERT INTO violations (user_id, exam_attempt_id, type, severity, action_taken, image_url)
                 VALUES (@userId, @attemptId, @type, @severity, @actionTaken, @imageUrl)
@@ -39,6 +50,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<List<ViolationModel>> GetViolationsByAttemptIdAsync(int attemptId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return await ServerApiClient.GetAsync<List<ViolationModel>>($"api/monitor/attempts/{attemptId}/violations");
+#endif
             var list = new List<ViolationModel>();
             const string sql = @"
                 SELECT id, user_id, exam_attempt_id, type, severity, action_taken, image_url, created_at
@@ -74,6 +88,9 @@ namespace CourseGuard.Backend.Data
 
         public async Task<int> CountViolationsByAttemptIdAsync(int attemptId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return (await GetViolationsByAttemptIdAsync(attemptId)).Count;
+#endif
             await using var conn = new NpgsqlConnection(_connectionString);
             await conn.OpenAsync();
             await EnsureViolationSchemaAsync(conn);

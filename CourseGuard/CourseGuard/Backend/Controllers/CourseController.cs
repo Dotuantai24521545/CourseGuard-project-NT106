@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using CourseGuard.Backend.Data;
 using CourseGuard.Backend.Models;
 using CourseGuard.Backend.Security;
+using CourseGuard.Backend.Services;
 
 namespace CourseGuard.Backend.Controllers
 {
@@ -14,6 +15,9 @@ namespace CourseGuard.Backend.Controllers
         public CourseController(CourseGuardDbContext dbContext)
         {
             _dbContext = dbContext;
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return;
+#endif
             _dbContext.EnsureCourseWorkflowSchema();
         }
 
@@ -23,11 +27,19 @@ namespace CourseGuard.Backend.Controllers
 
         public List<CourseModel> GetAllCourses()
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<CourseModel>>("api/course/GetAllCourses", new {  }).GetAwaiter().GetResult();
+#endif
+
             return _dbContext.GetAllCourses();
         }
 
         public string AddCourse(CourseModel course)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<string>("api/course/AddCourse", new { course }).GetAwaiter().GetResult();
+#endif
+
             if (!UserSessionContext.IsAdmin())
             {
                 return "Forbidden";
@@ -54,6 +66,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool UpdateCourse(CourseModel course)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/UpdateCourse", new { course }).GetAwaiter().GetResult();
+#endif
+
             if (!UserSessionContext.IsAdmin())
             {
                 return false;
@@ -80,6 +96,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool DeleteCourse(int courseId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/DeleteCourse", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             if (!UserSessionContext.IsAdmin())
             {
                 return false;
@@ -98,6 +118,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ApproveCourse(int courseId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/ApproveCourse", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             if (!UserSessionContext.IsAdmin())
                 return false;
 
@@ -128,6 +152,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool RejectCourse(int courseId, string reason)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/RejectCourse", new { courseId, reason }).GetAwaiter().GetResult();
+#endif
+
             if (!UserSessionContext.IsAdmin())
                 return false;
 
@@ -161,6 +189,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool EnrollStudent(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/EnrollStudent", new { courseId, studentId }).GetAwaiter().GetResult();
+#endif
+
             if (!UserSessionContext.IsAdmin())
             {
                 return false;
@@ -192,6 +224,10 @@ namespace CourseGuard.Backend.Controllers
 
         public HashSet<int> GetStudentEnrolledCourseIds(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<HashSet<int>>("api/course/GetStudentEnrolledCourseIds", new {  }).GetAwaiter().GetResult();
+#endif
+
             if (studentId <= 0)
             {
                 return new HashSet<int>();
@@ -202,6 +238,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool StudentJoinCourse(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/StudentJoinCourse", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             if (studentId <= 0)
             {
                 return false;
@@ -239,6 +279,10 @@ namespace CourseGuard.Backend.Controllers
 
         public List<EnrollmentModel> GetPendingEnrollments(int? courseId = null)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<EnrollmentModel>>("api/course/GetPendingEnrollments", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             // Allow both Admin and Teacher to view pending enrollments
             if (UserSessionContext.CurrentRole != "ADMIN" && UserSessionContext.CurrentRole != "TEACHER") 
                 return new List<EnrollmentModel>();
@@ -249,6 +293,10 @@ namespace CourseGuard.Backend.Controllers
 
         public List<EnrollmentModel> GetEnrollmentsByStatus(int courseId, string status)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<EnrollmentModel>>("api/course/GetEnrollmentsByStatus", new { courseId, status }).GetAwaiter().GetResult();
+#endif
+
             if (UserSessionContext.CurrentRole != "ADMIN" && UserSessionContext.CurrentRole != "TEACHER") 
                 return new List<EnrollmentModel>();
 
@@ -258,6 +306,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool ApproveEnrollment(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/ApproveEnrollment", new { courseId, studentId }).GetAwaiter().GetResult();
+#endif
+
             if (UserSessionContext.CurrentRole != "ADMIN") 
                 return false;
 
@@ -272,6 +324,10 @@ namespace CourseGuard.Backend.Controllers
 
         public bool RejectEnrollment(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<bool>("api/course/RejectEnrollment", new { courseId, studentId }).GetAwaiter().GetResult();
+#endif
+
             if (UserSessionContext.CurrentRole != "ADMIN") 
                 return false;
 
@@ -289,6 +345,10 @@ namespace CourseGuard.Backend.Controllers
         /// </summary>
         public List<CourseModel> GetAvailableCourses(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<CourseModel>>("api/course/GetAvailableCourses", new {  }).GetAwaiter().GetResult();
+#endif
+
             try
             {
                 return _dbContext.GetAvailableCourses(studentId);
@@ -305,12 +365,20 @@ namespace CourseGuard.Backend.Controllers
         /// </summary>
         public string? GetEnrollmentStatus(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<string?>("api/course/GetEnrollmentStatus", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             try { return _dbContext.GetEnrollmentStatus(courseId, studentId); }
             catch { return null; }
         }
 
         public List<EnrollmentModel> GetMyEnrollments(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<EnrollmentModel>>("api/course/GetMyEnrollments", new {  }).GetAwaiter().GetResult();
+#endif
+
             try
             {
                 return _dbContext.GetEnrollmentsByStudent(studentId);
@@ -326,6 +394,10 @@ namespace CourseGuard.Backend.Controllers
         /// </summary>
         public string RequestEnrollment(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<string>("api/course/RequestEnrollment", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             try
             {
                 CourseModel? course = _dbContext.GetCourseById(courseId);
@@ -370,6 +442,10 @@ namespace CourseGuard.Backend.Controllers
         /// </summary>
         public string DropCourse(int courseId, int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<string>("api/course/DropCourse", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             try
             {
                 var existing = _dbContext.GetEnrollmentStatus(courseId, studentId);
@@ -404,6 +480,10 @@ namespace CourseGuard.Backend.Controllers
         /// </summary>
         public int GetEnrolledCount(int courseId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<int>("api/course/GetEnrolledCount", new { courseId }).GetAwaiter().GetResult();
+#endif
+
             try
             {
                 return _dbContext.GetEnrolledCount(courseId);
@@ -416,6 +496,10 @@ namespace CourseGuard.Backend.Controllers
 
         public List<StudentScheduleItemModel> GetStudentOnlineSessions(int studentId)
         {
+#if !COURSEGUARD_SERVER
+            if (ServerApiClient.Enabled) return ServerApiClient.PostAsync<List<StudentScheduleItemModel>>("api/course/GetStudentOnlineSessions", new {  }).GetAwaiter().GetResult();
+#endif
+
             try
             {
                 return _dbContext.GetStudentOnlineSessions(studentId);

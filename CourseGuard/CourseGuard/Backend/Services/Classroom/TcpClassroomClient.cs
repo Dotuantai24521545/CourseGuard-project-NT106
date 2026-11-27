@@ -133,7 +133,8 @@ namespace CourseGuard.Backend.Services.Classroom
             string connectionUrl = $"{wsBase}/classroom-relay?role=student&classId={sessionId}&userId={userId}&name={nameEscaped}";
 
             _ws = new ClientWebSocket();
-            await _ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
+            if(CourseGuard.Backend.Services.ServerApiClient.Enabled)await CourseGuard.Backend.Services.ServerApiClient.ConnectClassroomAsync(_ws,sessionId,cancellationToken);
+            else await _ws.ConnectAsync(new Uri(connectionUrl), cancellationToken);
             _isConnected = true;
 
             StatusChanged?.Invoke(this, new ClassroomStatusEventArgs($"Đã kết nối tới Cloud Classroom Relay cho phòng {sessionId}."));

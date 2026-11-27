@@ -41,7 +41,7 @@ namespace CourseGuard.Frontend.Forms.Admin
             var dbContext = new CourseGuardDbContext("");
             _courseService = new CourseController(dbContext);
             _userService = new UserController(dbContext);
-            
+            this.AutoScroll = true;
             SetupUI();
             
             if (_courseId <= 0)
@@ -130,9 +130,9 @@ namespace CourseGuard.Frontend.Forms.Admin
             btn.Text = "";     // Prevent Button from drawing its own text (we draw in Paint)
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
-            btn.FlatAppearance.MouseOverBackColor = Color.Transparent;
-            btn.FlatAppearance.MouseDownBackColor = Color.Transparent;
-            btn.BackColor = Color.Transparent;
+            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 40, 60);
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(45, 50, 75);
+            btn.BackColor = Color.FromArgb(24, 28, 43);
             btn.UseVisualStyleBackColor = false;
             btn.Font = new Font("Segoe UI", 10, FontStyle.Regular);
             btn.Cursor = Cursors.Hand;
